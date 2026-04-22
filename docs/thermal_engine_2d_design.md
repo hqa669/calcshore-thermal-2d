@@ -304,3 +304,29 @@ Sprint 1–4 of the original plan continue from M5.
 ## Changelog
 
 - **2026-04-22** — Initial design spec authored. No code yet. Decisions D1–D6 locked.
+
+### Clarification: vertex-centered interface node ownership (resolved in M0)
+
+At material interfaces between blanket/concrete and concrete/soil, the
+interface node is shared between the two materials but `material_id` must
+label it as one or the other. Convention adopted in M0:
+
+- **Blanket/concrete interface** (y = t_blanket): node belongs to
+  **concrete**. `material_id[iy_concrete_start, ix] = 1`.
+- **Concrete/soil interface** (y = t_blanket + D_concrete): node belongs
+  to **concrete**. `material_id[iy_concrete_end, ix] = 1`.
+
+As a consequence:
+- `iy_concrete_start == iy_blanket_end` (both are the interface row)
+- `iy_blanket_end` is best read as "the y-index of the blanket/concrete
+  interface" rather than "the last blanket row"
+- Blanket has exactly `n_blanket` rows of strictly-blanket cells
+  (rows 0 to n_blanket - 1 at concrete columns)
+- Concrete has exactly `n_concrete_y` rows of concrete cells including
+  both interface nodes
+
+**Implication for M1/M2:** when the stencil applies hydration heat `Q` to
+concrete cells, it includes both interface rows. When the harmonic-mean
+`k` is computed at the blanket/concrete interface, the interface node's
+`k` is the concrete `k`, and the blanket `k` enters only through the
+upward face of that cell.
