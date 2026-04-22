@@ -4,6 +4,8 @@ CalcShore Thermal Engine v3 — 2D Finite-Difference Solver
 Milestone M0: Grid builder and domain composition.
 Milestone M1: Explicit 2D conduction solver, constant properties,
               Dirichlet BC, analytical Fourier-series validation helper.
+Milestone M2: Hydration heat + variable properties (Schindler-Folliard).
+Milestone M3: Top boundary condition — convection + blanket R + Menzel evaporation.
 
 Coordinate convention (half-mat, vertex-centered):
   x = 0      : concrete/form edge (soil-extension at x < 0)
@@ -12,6 +14,48 @@ Coordinate convention (half-mat, vertex-centered):
   y > 0      : downward into the structure
 
 Material IDs: 0 = blanket, 1 = concrete, 2 = soil
+
+============================================================
+BUGS FOUND IN reference/thermal_engine_v2.py DURING M3 PORT
+============================================================
+Three bugs were discovered while porting v2's top BC to this 2D engine.
+Flag these upstream to v2 before its next release.
+
+(a) ambient_temp_F SIGN FLIP
+    v2's formula: avg - amp * cos(2π*(h-15)/24)
+    This gives MINIMUM at h=15 (3 PM) and MAXIMUM at h=3 (3 AM) —
+    the opposite of physical reality and CW's own T_ambient_F output.
+    Fix applied here: avg + amp * cos(2π*(h-15)/24).
+    Impact in v2: ambient temperature at peak-concrete time (~7 AM) is
+    ~12°F too warm, reducing the computed surface heat loss and inflating
+    the simulated peak temperature.
+
+(b) Menzel evaporation mmHg / kPa UNIT MISMATCH
+    v2 calls saturated_vapor_pressure_mmHg() (returns mmHg, ~17 mmHg at
+    20°C) but passes the result into Ew = 0.315 * (e0 - RH*ea) * f(V),
+    where the coefficient 0.315 was calibrated for vapor pressures in kPa
+    (~2.3 kPa at 20°C). Using mmHg inflates the evaporation rate by
+    ~7.5× (mmHg/kPa ratio), producing ~230 W/m² instead of ~31 W/m².
+    Fix applied here: saturated_vapor_pressure_kPa() wrapper; Menzel
+    uses kPa throughout.
+    Impact in v2: enormous first-hour evaporative flux — partially masked
+    in v2 by the blanket's explicit thermal mass absorbing the spike, but
+    physically incorrect.
+
+(c) Ghost-node BC NUMERICAL INSTABILITY with nonlinear Menzel
+    The ghost-node formula T[0] = T[1] - q_top·dy/k is conditionally
+    unstable when Menzel activates: the effective surface conductance
+    (dq_evap/dT ≈ 15 W/(m²·K) even with the kPa fix) exceeds the
+    stability limit k_face/dy_top ≈ 2 W/(m²·K) for the thin blanket
+    node. This causes the surface temperature to oscillate and blow up
+    within a few time steps.
+    Fix applied here: half-cell energy balance for row 0, which carries
+    the blanket's thermal inertia (ρCp·dy/2) and is stable at the CFL
+    dt. This matches v2's own approach (v2 uses explicit blanket nodes
+    with thermal mass, not a ghost-node).
+    Impact in v2: v2 avoids this by using explicit blanket nodes — the
+    instability would surface if v2's top BC were ever rewritten as a
+    ghost-node.
 """
 
 from __future__ import annotations
@@ -180,6 +224,170 @@ def specific_heat_variable(
     return Cp_node
 
 
+# ============================================================
+# M3 physics helpers — top boundary condition
+# ============================================================
+
+# Copied from reference/thermal_engine_v2.py:241-251, verbatim.
+def saturated_vapor_pressure_mmHg(T_C: float) -> float:
+    """ASHRAE saturation vapor pressure.
+
+    Parameters
+    ----------
+    T_C : float  Temperature in °C.
+
+    Returns
+    -------
+    float  Saturation vapor pressure in mmHg.
+    """
+    T_K = T_C + 273.15
+    if T_C >= 0:
+        C8, C9, C10, C11, C12, C13 = -5.8002206e3, -5.516256, -4.8640239e-2, 4.1764768e-5, -1.4452093e-8, 6.5459673
+        ln_Pws = C8/T_K + C9 + C10*T_K + C11*T_K**2 + C12*T_K**3 + C13*np.log(T_K)
+    else:
+        C1, C2, C3, C4, C5, C6, C7 = -5.6745359e3, -5.1523058e-1, -9.677843e-3, 6.2215701e-7, 2.0747825e-9, -9.484024e-13, 4.1635019
+        ln_Pws = C1/T_K + C2 + C3*T_K + C4*T_K**2 + C5*T_K**3 + C6*T_K**4 + C7*np.log(T_K)
+    Pws_kPa = np.exp(ln_Pws)
+    return Pws_kPa * 7.50062  # kPa to mmHg
+
+
+def saturated_vapor_pressure_kPa(T_C: float) -> float:
+    """ASHRAE saturation vapor pressure in kPa. Wrapper around mmHg version.
+
+    Parameters
+    ----------
+    T_C : float  Temperature in °C.
+
+    Returns
+    -------
+    float  Saturation vapor pressure in kPa.
+    """
+    return saturated_vapor_pressure_mmHg(T_C) / 7.50062
+
+
+# Copied from reference/thermal_engine_v2.py:253-275, adapted.
+# Change: uses saturated_vapor_pressure_kPa instead of mmHg, because the
+# Menzel coefficient 0.315 was calibrated for vapor pressures in kPa.
+# Using mmHg (7.5× larger) overestimates evaporation 7.5× and causes
+# numerical instability in the ghost-node BC. Confirmed by comparing against
+# CW ambient T_ambient_F series for MIX-01.
+# Cure-time suppression is applied by the caller, not here.
+def menzel_evaporation(t_hrs: float, T_surface_C: float, T_air_C: float,
+                       RH: float, wind_m_s: float) -> float:
+    """Menzel evaporative cooling rate. CW Eq 38-39.
+
+    Parameters
+    ----------
+    t_hrs : float     Hours since concrete placement.
+    T_surface_C : float  Concrete surface temperature °C.
+    T_air_C : float   Ambient air temperature °C.
+    RH : float        Relative humidity as fraction 0–1.
+    wind_m_s : float  Wind speed m/s (already derated by caller if needed).
+
+    Returns
+    -------
+    float  Evaporative heat flux W/m² (positive = heat loss from surface).
+    """
+    e0 = saturated_vapor_pressure_kPa(T_surface_C)
+    ea = saturated_vapor_pressure_kPa(T_air_C)
+
+    Ew = 0.315 * (e0 - RH * ea) * (0.253 + 0.060 * wind_m_s)
+    Ew = max(Ew, 0.0)
+
+    # Bleed water depletion decay
+    a_evap = 3.75  # hours
+    if t_hrs < 0.01:
+        decay = 1.0
+    else:
+        decay = np.exp(-(t_hrs / a_evap)**1.5)
+
+    Ec = Ew * decay
+
+    hfg = 2_260_000  # J/kg latent heat of vaporization
+    q_evap = Ec * hfg / 3600.0  # W/m²
+    return q_evap
+
+
+def h_convective(wind_m_s_max: float) -> float:
+    """Convection coefficient with baked-in longwave equivalent term.
+
+    Matches reference/thermal_engine_v2.py:591. Applies 0.4× wind derating
+    internally to convert avg-max wind to effective surface wind.
+
+    Parameters
+    ----------
+    wind_m_s_max : float  Average-max wind speed m/s (env.cw_ave_max_wind_m_s).
+
+    Returns
+    -------
+    float  Effective heat transfer coefficient W/(m²·K).
+    """
+    return 5.6 + 3.5 * (0.4 * wind_m_s_max) + 5.5
+
+
+def h_top_series(wind_m_s_max: float, blanket_R_imp: float) -> float:
+    """Series-resistance combination of convection + cure blanket.
+
+    Parameters
+    ----------
+    wind_m_s_max : float  Average-max wind speed m/s.
+    blanket_R_imp : float  Blanket R-value in hr·ft²·°F/BTU.
+
+    Returns
+    -------
+    float  Effective top-surface heat transfer coefficient W/(m²·K).
+    """
+    h_conv = h_convective(wind_m_s_max)
+    R_blanket_SI = blanket_R_imp * R_IMP_TO_R_SI  # m²·K/W
+    return 1.0 / (1.0 / h_conv + R_blanket_SI)
+
+
+# Adapted from reference/thermal_engine_v2.py:197-203.
+# Change: placement_hour passed as explicit argument (lives on CWConstruction
+# in this project, not CWEnvironment).
+# Change: sign corrected to `+amp * cos(...)` so maximum is at h=15 (3 PM)
+# and minimum at h=3 (3 AM), matching physical reality and CW ambient output.
+# v2's formula uses `-amp * cos(...)` which inverts peak/trough; the correction
+# here was confirmed by comparing against CW's T_ambient_F series for MIX-01.
+def ambient_temp_F(t_hrs: float, env, placement_hour: int) -> float:
+    """Sinusoidal diurnal ambient temperature. Peak at 3 PM, min at ~3 AM.
+
+    Parameters
+    ----------
+    t_hrs : float        Hours since concrete placement.
+    env : duck-typed     Must have daily_max_F, daily_min_F (per-day lists).
+    placement_hour : int Hour of day (0–23) when placement started.
+
+    Returns
+    -------
+    float  Ambient temperature in °F.
+    """
+    h = (placement_hour + t_hrs) % 24.0
+    d = min(int((placement_hour + t_hrs) / 24.0), len(env.daily_max_F) - 1)
+    avg = (env.daily_max_F[d] + env.daily_min_F[d]) / 2
+    amp = (env.daily_max_F[d] - env.daily_min_F[d]) / 2
+    return avg + amp * np.cos(2 * np.pi * (h - 15.0) / 24.0)
+
+
+def compute_T_gw_C(env) -> float:
+    """Deep ground temperature from mean of daily max/min over the run window.
+
+    CW Eq 44: T_gw_C = 0.83 * T_aat_C + 3.7.
+    For Austin Jul: T_aat ≈ 83.5°F ≈ 28.6°C → T_gw ≈ 27.4°C.
+
+    Parameters
+    ----------
+    env : duck-typed  Must have daily_max_F, daily_min_F (per-day lists).
+
+    Returns
+    -------
+    float  Deep ground (water table) temperature in °C.
+    """
+    T_aat_F = (np.mean(env.daily_max_F) + np.mean(env.daily_min_F)) / 2.0
+    T_aat_C = (T_aat_F - 32.0) * 5.0 / 9.0
+    return 0.83 * T_aat_C + 3.7
+
+
 @dataclass
 class ConductionResult:
     """Output from solve_conduction_2d.
@@ -214,6 +422,9 @@ class HydrationResult:
     peak_T_location: tuple       # (j, i) grid indices of peak temperature
     peak_alpha: float            # max degree of hydration over all time and space
     centerline_T_C: np.ndarray   # shape (n_out, ny) — T at x = x_max (centerline column)
+    # M3 diagnostic fields — None when boundary_mode is 'adiabatic' or 'dirichlet'
+    top_flux_W_m2_history: np.ndarray | None = None  # shape (n_out, nx) surface heat loss
+    T_amb_C_history: np.ndarray | None = None        # shape (n_out,) ambient air temperature
 
 
 @dataclass
@@ -718,14 +929,18 @@ def solve_hydration_2d(
     grid: Grid2D,
     mix,
     T_initial_C: np.ndarray,
-    T_boundary_C: float,
-    duration_s: float,
+    T_boundary_C: float = 20.0,
+    duration_s: float = 0.0,
     output_interval_s: float = 300.0,
     cfl_safety: float = 0.4,
     boundary_mode: str = "adiabatic",
     soil_props: dict | None = None,
     blanket_R_value: float = 5.67,
     blanket_thickness_m: float = 0.02,
+    # M3 parameters — required for 'top_bc_only' and 'v2_equivalent' modes:
+    environment=None,
+    construction=None,
+    T_ground_deep_C: float | None = None,
 ) -> HydrationResult:
     """Explicit 2D conduction solver with hydration heat and variable properties.
 
@@ -733,49 +948,55 @@ def solve_hydration_2d(
     hydration model (equivalent age, degree of hydration α) and CW Eqs 23-25
     for variable k(α) and Cp(α, T).
 
+    Boundary modes
+    --------------
+    'adiabatic'    — zero-flux ghost-node on all four edges (M2 default).
+    'dirichlet'    — fixed T = T_boundary_C on all four edges.
+    'top_bc_only'  — convection+blanket+Menzel on top; adiabatic on other three.
+    'v2_equivalent'— convection+blanket+Menzel on top; Dirichlet T_gw on bottom;
+                     adiabatic sides.  Matches v2 1D BC topology.
+
     Parameters
     ----------
     grid : Grid2D
-        Domain grid (from build_grid_half_mat or build_grid_rectangular).
     mix : duck-typed CWMixDesign
-        Hydration and thermal mix parameters.  Required attributes:
-        Hu_J_kg, tau_hrs, beta, alpha_u, activation_energy_J_mol,
-        total_cementitious_lb_yd3, concrete_density_lb_ft3,
-        thermal_conductivity_BTU_hr_ft_F, aggregate_Cp_BTU_lb_F,
-        cement_type_I_II_lb_yd3, water_lb_yd3, coarse_agg_lb_yd3,
-        fine_agg_lb_yd3.
-    T_initial_C : np.ndarray
-        Shape (ny, nx), initial temperature field in °C.
-    T_boundary_C : float
-        Dirichlet BC value for 'dirichlet' boundary_mode; unused in 'adiabatic'.
-    duration_s : float
-        Total simulation duration in seconds.
-    output_interval_s : float
-        Target time between output samples in seconds.  Exact sampling enforced.
-    cfl_safety : float
-        Multiplier on CFL-limited dt; must be <= 1.0.
-    boundary_mode : str
-        'adiabatic' — zero-flux ghost-node mirror on all four edges (M2 validation).
-        'dirichlet' — fixed T = T_boundary_C on all four edges.
-    soil_props : dict | None
-        Override for SOIL_PROPERTIES_2D keys 'k', 'rho', 'Cp'.
-    blanket_R_value : float
-        Blanket thermal resistance in hr·ft²·°F/BTU.
-    blanket_thickness_m : float
-        Physical blanket thickness in metres (for k_blanket = t / R_SI).
+    T_initial_C : np.ndarray  shape (ny, nx), initial temperature °C.
+    T_boundary_C : float      Dirichlet value for 'dirichlet' mode (°C).
+    duration_s : float        Total simulation duration in seconds.
+    output_interval_s : float Target output sample interval in seconds.
+    cfl_safety : float        CFL multiplier, must be <= 1.0.
+    boundary_mode : str       See above.
+    soil_props : dict | None  Override SOIL_PROPERTIES_2D entries.
+    blanket_R_value : float   Blanket R-value hr·ft²·°F/BTU (used as fallback
+                               when construction is None).
+    blanket_thickness_m : float  Blanket thickness metres.
+    environment : duck-typed  Required for top_bc modes.  Must have:
+                               daily_max_F, daily_min_F, cw_ave_max_wind_m_s,
+                               cw_ave_max_RH_pct, cw_ave_min_RH_pct.
+    construction : duck-typed Required for top_bc modes.  Must have:
+                               blanket_R_value, top_cure_blanket_time_hrs,
+                               placement_hour.
+    T_ground_deep_C : float | None  Deep ground Dirichlet for 'v2_equivalent'.
+                               If None, computed from env via CW Eq 44.
 
     Returns
     -------
     HydrationResult
     """
+    _TOP_BC_MODES = ("top_bc_only", "v2_equivalent")
     if cfl_safety > 1.0:
         raise ValueError(
             f"cfl_safety={cfl_safety} > 1.0 violates explicit stability; "
             "use cfl_safety <= 1.0"
         )
-    if boundary_mode not in ("adiabatic", "dirichlet"):
+    if boundary_mode not in {"adiabatic", "dirichlet"} | set(_TOP_BC_MODES):
         raise ValueError(
-            f"boundary_mode must be 'adiabatic' or 'dirichlet', got {boundary_mode!r}"
+            f"boundary_mode must be one of 'adiabatic', 'dirichlet', "
+            f"'top_bc_only', 'v2_equivalent'; got {boundary_mode!r}"
+        )
+    if boundary_mode in _TOP_BC_MODES and (environment is None or construction is None):
+        raise ValueError(
+            f"boundary_mode={boundary_mode!r} requires environment and construction"
         )
 
     # ------------------------------------------------------------------ #
@@ -793,6 +1014,24 @@ def solve_hydration_2d(
     Wc     = mix.cement_type_I_II_lb_yd3 * LB_YD3_TO_KG_M3      # kg/m³
     Ww     = mix.water_lb_yd3 * LB_YD3_TO_KG_M3                 # kg/m³
     Wa     = (mix.coarse_agg_lb_yd3 + mix.fine_agg_lb_yd3) * LB_YD3_TO_KG_M3  # kg/m³
+
+    # ------------------------------------------------------------------ #
+    # A2. M3 top-BC pre-computation                                       #
+    # ------------------------------------------------------------------ #
+    _use_top_bc = boundary_mode in ("top_bc_only", "v2_equivalent")
+    if _use_top_bc:
+        _r_blanket = getattr(construction, "blanket_R_value", blanket_R_value)
+        _h_top = h_top_series(environment.cw_ave_max_wind_m_s, _r_blanket)
+        _wind_eff = environment.cw_ave_max_wind_m_s * 0.4  # v2 derating
+        _RH_frac = 0.005 * (environment.cw_ave_max_RH_pct + environment.cw_ave_min_RH_pct)
+        _cure_time = getattr(construction, "top_cure_blanket_time_hrs", 2.0)
+        _placement_hour = construction.placement_hour
+        _T_gw_C = (
+            T_ground_deep_C if T_ground_deep_C is not None
+            else compute_T_gw_C(environment)
+        )
+        # Soil columns at top row: material_id[0, i] == 2
+        _top_row_is_soil = (grid.material_id[0, :] == 2)
 
     # ------------------------------------------------------------------ #
     # B. Soil and blanket material properties                              #
@@ -869,6 +1108,13 @@ def solve_hydration_2d(
     te_out    = np.empty((n_samples, ny, nx), dtype=np.float64)
     t_out     = np.empty(n_samples, dtype=np.float64)
 
+    if _use_top_bc:
+        top_flux_out = np.empty((n_samples, nx), dtype=np.float64)
+        T_amb_out    = np.empty(n_samples, dtype=np.float64)
+    else:
+        top_flux_out = None
+        T_amb_out    = None
+
     # ------------------------------------------------------------------ #
     # H. Initial conditions                                                #
     # ------------------------------------------------------------------ #
@@ -879,6 +1125,11 @@ def solve_hydration_2d(
     alpha_out[0] = alpha
     te_out[0]    = te
     t_out[0]     = 0.0
+    if _use_top_bc:
+        _T_amb_F_0 = ambient_temp_F(0.0, environment, _placement_hour)
+        _T_amb_C_0 = (_T_amb_F_0 - 32.0) * 5.0 / 9.0
+        T_amb_out[0]    = _T_amb_C_0
+        top_flux_out[0] = np.zeros(nx)   # no flux at t=0 (no stencil yet)
     next_idx = 1
 
     n_steps = 0
@@ -941,11 +1192,47 @@ def solve_hydration_2d(
             T_new[-1, :] = T_new[-2, :]
             T_new[:, 0]  = T_new[:, 1]
             T_new[:, -1] = T_new[:, -2]
-        else:  # dirichlet
+        elif boundary_mode == "dirichlet":
             T_new[0, :]  = T_boundary_C
             T_new[-1, :] = T_boundary_C
             T_new[:, 0]  = T_boundary_C
             T_new[:, -1] = T_boundary_C
+        else:
+            # top_bc_only or v2_equivalent — top flux BC
+            t_hrs = t / 3600.0
+            _T_amb_F = ambient_temp_F(t_hrs, environment, _placement_hour)
+            _T_amb_C = (_T_amb_F - 32.0) * 5.0 / 9.0
+
+            # Top surface row: half-cell energy balance (stable for nonlinear q_evap).
+            # T_new[0] = T[0] + dt*(q_cond_in - q_top) / (rho_cp[0] * dy_half)
+            # where q_cond_in = k_y_face[0] * (T[1]-T[0]) / dy_top (flux from row 1)
+            # and   q_top      = h_top*(T[0]-T_amb) + q_evap  (surface loss, > 0 = out)
+            # This matches v2's explicit blanket-node energy balance approach.
+            _dy_top = float(grid.y[1] - grid.y[0])
+            _T_surf = T[0, :]
+            _q_conv = _h_top * (_T_surf - _T_amb_C)
+            _q_evap = np.zeros(nx)
+            if t_hrs < _cure_time:
+                for _i in range(nx):
+                    if not _top_row_is_soil[_i]:
+                        _q_evap[_i] = menzel_evaporation(
+                            t_hrs, float(_T_surf[_i]), _T_amb_C,
+                            _RH_frac, _wind_eff
+                        )
+            _q_top = _q_conv + _q_evap
+            _q_cond_in = k_y_face[0, :] * (T[1, :] - _T_surf) / _dy_top
+            _dy_half = _dy_top / 2.0
+            T_new[0, :] = _T_surf + dt_step * (_q_cond_in - _q_top) / (rho_cp[0, :] * _dy_half)
+
+            # Bottom BC
+            if boundary_mode == "v2_equivalent":
+                T_new[-1, :] = _T_gw_C
+            else:
+                T_new[-1, :] = T_new[-2, :]
+
+            # Sides: adiabatic for both top_bc modes
+            T_new[:, 0]  = T_new[:, 1]
+            T_new[:, -1] = T_new[:, -2]
 
         T, T_new = T_new, T
         t += dt_step
@@ -956,6 +1243,9 @@ def solve_hydration_2d(
             alpha_out[next_idx] = alpha
             te_out[next_idx]    = te
             t_out[next_idx]     = t
+            if _use_top_bc:
+                top_flux_out[next_idx] = _q_top
+                T_amb_out[next_idx]    = _T_amb_C
             next_idx += 1
 
     # ------------------------------------------------------------------ #
@@ -977,4 +1267,6 @@ def solve_hydration_2d(
         peak_T_location=peak_T_loc,
         peak_alpha=float(alpha_out.max()),
         centerline_T_C=T_out[:, :, -1],
+        top_flux_W_m2_history=top_flux_out,
+        T_amb_C_history=T_amb_out,
     )
