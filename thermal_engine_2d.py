@@ -2,7 +2,8 @@
 CalcShore Thermal Engine v3 — 2D Finite-Difference Solver
 ==========================================================
 Milestone M0: Grid builder and domain composition.
-No physics, no time stepping, no BC application.
+Milestone M1: Explicit 2D conduction solver, constant properties,
+              Dirichlet BC, analytical Fourier-series validation helper.
 
 Coordinate convention (half-mat, vertex-centered):
   x = 0      : concrete/form edge (soil-extension at x < 0)
@@ -21,6 +22,22 @@ from dataclasses import dataclass
 import numpy as np
 
 FT_TO_M = 0.3048
+
+
+@dataclass
+class ConductionResult:
+    """Output from solve_conduction_2d.
+
+    All temperatures in °C, times in seconds.
+    """
+
+    t_s: np.ndarray           # shape (n_out,) — sampled time points
+    T_field_C: np.ndarray     # shape (n_out, ny, nx)
+    dt_inner_s: float         # actual inner time step used
+    n_inner_steps: int        # total inner time steps executed
+    n_output_samples: int     # len(t_s)
+    peak_T_C: float           # max over all time and space
+    min_T_C: float            # min over all time and space
 
 
 @dataclass
@@ -202,3 +219,270 @@ def build_grid_half_mat(
         n_soil_x_ext=n_soil_x_ext,
         n_soil_y=n_soil_y,
     )
+
+
+def build_grid_rectangular(
+    Lx_m: float,
+    Ly_m: float,
+    nx: int,
+    ny: int,
+) -> Grid2D:
+    """Build a uniform rectangular grid with all nodes labelled as concrete.
+
+    Used for M1 analytical validation and future pavement scenarios.
+    x in [0, Lx_m], y in [0, Ly_m], uniform spacing on both axes.
+
+    Parameters
+    ----------
+    Lx_m : float
+        Domain width in metres (x-extent).
+    Ly_m : float
+        Domain depth in metres (y-extent).
+    nx : int
+        Number of nodes in x (>= 3).
+    ny : int
+        Number of nodes in y (>= 3).
+
+    Returns
+    -------
+    Grid2D
+    """
+    if Lx_m <= 0.0 or Ly_m <= 0.0:
+        raise ValueError(f"Lx_m and Ly_m must be positive, got {Lx_m}, {Ly_m}")
+    if nx < 3 or ny < 3:
+        raise ValueError(f"nx and ny must be >= 3, got {nx}, {ny}")
+
+    x = np.linspace(0.0, Lx_m, nx)
+    y = np.linspace(0.0, Ly_m, ny)
+    dx = Lx_m / (nx - 1)
+
+    material_id = np.ones((ny, nx), dtype=np.int8)
+    is_concrete = np.ones((ny, nx), dtype=bool)
+    is_blanket = np.zeros((ny, nx), dtype=bool)
+    is_soil = np.zeros((ny, nx), dtype=bool)
+
+    return Grid2D(
+        x=x,
+        y=y,
+        material_id=material_id,
+        is_blanket=is_blanket,
+        is_concrete=is_concrete,
+        is_soil=is_soil,
+        ix_concrete_start=0,
+        ix_concrete_end=nx - 1,
+        iy_blanket_end=-1,
+        iy_concrete_start=0,
+        iy_concrete_end=ny - 1,
+        iy_centerline=ny // 2,
+        nx=nx,
+        ny=ny,
+        dx=dx,
+        n_blanket=0,
+        n_concrete_x=nx,
+        n_concrete_y=ny,
+        n_soil_x_ext=0,
+        n_soil_y=0,
+    )
+
+
+def solve_conduction_2d(
+    grid: Grid2D,
+    k_W_m_K: float,
+    rho_kg_m3: float,
+    Cp_J_kg_K: float,
+    T_initial_C: np.ndarray,
+    T_boundary_C: float,
+    duration_s: float,
+    output_interval_s: float = 300.0,
+    cfl_safety: float = 0.4,
+) -> ConductionResult:
+    """Explicit 5-point 2D conduction solver with constant properties.
+
+    Solves  ρ Cp ∂T/∂t = k (∂²T/∂x² + ∂²T/∂y²)  on the Grid2D domain
+    with fixed Dirichlet BCs on all four sides.
+
+    Stencil (D4, non-uniform dy):
+        T_new[j,i] = T[j,i] + dt·α·(
+            (T[j,i+1] - 2T[j,i] + T[j,i-1]) / dx²
+          + (2/(dy+ + dy-)) · ((T[j+1,i]-T[j,i])/dy+ - (T[j,i]-T[j-1,i])/dy-)
+        )
+
+    Parameters
+    ----------
+    grid : Grid2D
+    k_W_m_K : float
+        Thermal conductivity W/(m·K).
+    rho_kg_m3 : float
+        Density kg/m³.
+    Cp_J_kg_K : float
+        Specific heat J/(kg·K).
+    T_initial_C : np.ndarray
+        Shape (ny, nx), initial temperature field in °C.
+    T_boundary_C : float
+        Dirichlet BC value applied to all four edges every step.
+    duration_s : float
+        Total simulation duration in seconds.
+    output_interval_s : float
+        Time between output samples in seconds.
+    cfl_safety : float
+        Multiplier on CFL-limited dt; must be <= 1.0.
+
+    Returns
+    -------
+    ConductionResult
+    """
+    if cfl_safety > 1.0:
+        raise ValueError(
+            f"cfl_safety={cfl_safety} > 1.0 violates explicit stability; "
+            "use cfl_safety <= 1.0"
+        )
+
+    alpha = k_W_m_K / (rho_kg_m3 * Cp_J_kg_K)
+    dx = grid.dx
+    dy_all = np.diff(grid.y)          # (ny-1,)
+    dy_min = float(dy_all.min())
+
+    dt_cfl = 0.5 / (alpha * (1.0 / dx**2 + 1.0 / dy_min**2))
+    dt = cfl_safety * dt_cfl
+
+    # per-interior-row spacings broadcast over x automatically
+    dy_plus  = dy_all[1:].reshape(-1, 1)    # (ny-2, 1): y[j+1]-y[j] for j=1..ny-2
+    dy_minus = dy_all[:-1].reshape(-1, 1)   # (ny-2, 1): y[j]-y[j-1]
+    inv_dxsq = 1.0 / dx**2
+    y_coef   = 2.0 / (dy_plus + dy_minus)   # (ny-2, 1)
+
+    # For M1, k is uniform so all four face-k values equal k_W_m_K.
+    # These scalars make the stencil M2-ready: swap to arrays for harmonic mean.
+    k_face = k_W_m_K  # k_x_plus = k_x_minus = k_y_plus = k_y_minus
+
+    # Determine output sample times (include t=0)
+    n_samples = int(round(duration_s / output_interval_s)) + 1
+    t_samples = np.linspace(0.0, duration_s, n_samples)
+
+    T_out = np.empty((n_samples, grid.ny, grid.nx), dtype=np.float64)
+    t_out = np.empty(n_samples, dtype=np.float64)
+
+    T = T_initial_C.astype(np.float64, copy=True)
+    T_new = np.empty_like(T)
+
+    # Apply BC to initial field so boundary is consistent from the start
+    T[0, :]  = T_boundary_C
+    T[-1, :] = T_boundary_C
+    T[:, 0]  = T_boundary_C
+    T[:, -1] = T_boundary_C
+
+    # Store t=0 sample
+    T_out[0] = T
+    t_out[0] = 0.0
+    next_sample = 1
+
+    n_steps = 0
+    sim_time = 0.0
+
+    while sim_time < duration_s - 1e-12:
+        # Don't overshoot duration
+        dt_step = min(dt, duration_s - sim_time)
+
+        Tc  = T[1:-1, 1:-1]
+        Tip = T[1:-1, 2:  ]
+        Tim = T[1:-1,  :-2]
+        Tjp = T[2:  , 1:-1]
+        Tjm = T[ :-2, 1:-1]
+
+        lap_x = (Tip - 2.0 * Tc + Tim) * inv_dxsq * k_face
+        lap_y = k_face * y_coef * ((Tjp - Tc) / dy_plus - (Tc - Tjm) / dy_minus)
+
+        T_new[1:-1, 1:-1] = Tc + (dt_step / (rho_kg_m3 * Cp_J_kg_K)) * (lap_x + lap_y)
+
+        T_new[0, :]  = T_boundary_C
+        T_new[-1, :] = T_boundary_C
+        T_new[:, 0]  = T_boundary_C
+        T_new[:, -1] = T_boundary_C
+
+        T, T_new = T_new, T
+        sim_time += dt_step
+        n_steps += 1
+
+        # Capture output samples whose scheduled time has been reached
+        while next_sample < n_samples and sim_time >= t_samples[next_sample] - dt * 0.5:
+            T_out[next_sample] = T
+            t_out[next_sample] = sim_time
+            next_sample += 1
+
+    # Ensure all samples filled (handles edge case where duration is exact)
+    while next_sample < n_samples:
+        T_out[next_sample] = T
+        t_out[next_sample] = sim_time
+        next_sample += 1
+
+    return ConductionResult(
+        t_s=t_out,
+        T_field_C=T_out,
+        dt_inner_s=dt,
+        n_inner_steps=n_steps,
+        n_output_samples=n_samples,
+        peak_T_C=float(T_out.max()),
+        min_T_C=float(T_out.min()),
+    )
+
+
+def analytical_square_slab(
+    x: np.ndarray,
+    y: np.ndarray,
+    t: float,
+    Lx: float,
+    Ly: float,
+    alpha: float,
+    T_init: float,
+    T_bc: float,
+    n_terms: int = 11,
+) -> np.ndarray:
+    """Analytical solution for 2D diffusion in a rectangle with Dirichlet BCs.
+
+    Solves ∂T/∂t = α(∂²T/∂x² + ∂²T/∂y²) on [0,Lx]×[0,Ly] with
+    T=T_bc on all four sides and T(x,y,0)=T_init (uniform).
+
+    θ(x,y,t) = θ₀·(16/π²)·Σ_m Σ_n sin(mπx/Lx)·sin(nπy/Ly)/(m·n)
+                           ·exp(-α·π²·t·(m²/Lx²+n²/Ly²))
+    where m, n = 1, 3, 5, … (odd integers only), θ = T - T_bc.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Shape (nx,), node x-coordinates (domain should start at 0).
+    y : np.ndarray
+        Shape (ny,), node y-coordinates (domain should start at 0).
+    t : float
+        Evaluation time in seconds.
+    Lx, Ly : float
+        Domain extents in metres.
+    alpha : float
+        Thermal diffusivity m²/s.
+    T_init : float
+        Uniform initial temperature °C.
+    T_bc : float
+        Dirichlet boundary temperature °C.
+    n_terms : int
+        Number of odd Fourier modes (1, 3, …, 2*n_terms-1).
+
+    Returns
+    -------
+    np.ndarray
+        Shape (ny, nx), temperature field in °C.
+    """
+    odd = 2 * np.arange(n_terms) + 1   # [1, 3, 5, ...]
+    theta0 = T_init - T_bc
+    prefactor = theta0 * (16.0 / np.pi**2)
+
+    X = x[np.newaxis, :]    # (1, nx)
+    Y = y[:, np.newaxis]    # (ny, 1)
+
+    theta = np.zeros((y.size, x.size), dtype=np.float64)
+    for m in odd:
+        sx = np.sin(m * np.pi * X / Lx)         # (1, nx)
+        for n in odd:
+            sy = np.sin(n * np.pi * Y / Ly)     # (ny, 1)
+            decay = np.exp(-alpha * np.pi**2 * t * (m**2 / Lx**2 + n**2 / Ly**2))
+            theta += sx * sy * (decay / (m * n))
+
+    return T_bc + prefactor * theta
