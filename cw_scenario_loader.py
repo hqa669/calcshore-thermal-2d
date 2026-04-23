@@ -194,6 +194,10 @@ class CWEnvironment:
     The daily averages are what CW displays in its UI ("Ave. Max Daily Solar =
     848.1 W/m²") and may differ slightly from our hourly-array max if CW uses
     internal smoothing or design factors.
+
+    T_dp_C and T_sky_C are computed at load time from the weather file columns
+    (T_dry_bulb_C, RH_pct, cloud_cover) via Magnus-Tetens and Berdahl-Martin
+    respectively. They are not parsed directly from the weather file.
     """
     # Hourly time series, length = 24 * analysis_duration_days
     hours: np.ndarray = field(default_factory=lambda: np.array([]))
@@ -203,6 +207,9 @@ class CWEnvironment:
     wind_m_s: np.ndarray = field(default_factory=lambda: np.array([]))
     cloud_cover: np.ndarray = field(default_factory=lambda: np.array([]))
     pressure_hPa: np.ndarray = field(default_factory=lambda: np.array([]))
+    # Computed hourly fields (derived from weather columns at load time)
+    T_dp_C: np.ndarray = field(default_factory=lambda: np.array([]))
+    T_sky_C: np.ndarray = field(default_factory=lambda: np.array([]))
 
     # Per-day summary (daily max/min of the dry-bulb air temp)
     daily_max_F: List[float] = field(default_factory=list)
@@ -381,6 +388,80 @@ WEATHER_COL = {
 }
 
 
+def dew_point_C(T_air_C: np.ndarray, RH_pct: np.ndarray) -> np.ndarray:
+    """Magnus-Tetens dew-point approximation.
+
+    Parameters
+    ----------
+    T_air_C : np.ndarray
+        Air temperature in °C.
+    RH_pct : np.ndarray
+        Relative humidity in percent (0-100).
+
+    Returns
+    -------
+    np.ndarray
+        Dew-point temperature in °C.
+
+    Notes
+    -----
+    Valid for -45°C < T < +60°C, 1% < RH < 100%. Accuracy ±0.4°C.
+    Reference: Alduchov & Eskridge (1996), "Improved Magnus form
+    approximation of saturation vapor pressure", J. Appl. Meteor. 35(4).
+
+    Examples
+    --------
+    >>> dew_point_C(np.array([25.0]), np.array([50.0]))
+    array([13.86...])
+    """
+    a = 17.625
+    b = 243.04
+    RH_frac = np.clip(np.asarray(RH_pct, dtype=float) / 100.0, 0.01, 1.0)
+    T = np.asarray(T_air_C, dtype=float)
+    gamma = np.log(RH_frac) + (a * T) / (b + T)
+    return (b * gamma) / (a - gamma)
+
+
+def sky_temp_C(T_air_C: np.ndarray, T_dp_C: np.ndarray,
+               cloud_cover_octas: np.ndarray) -> np.ndarray:
+    """Berdahl-Martin effective sky temperature with cloud correction.
+
+    Parameters
+    ----------
+    T_air_C : np.ndarray
+        Air temperature in °C.
+    T_dp_C : np.ndarray
+        Dew-point temperature in °C (e.g., from dew_point_C).
+    cloud_cover_octas : np.ndarray
+        Cloud cover in octas (0 = clear, 8 = overcast).
+
+    Returns
+    -------
+    np.ndarray
+        Effective sky temperature in °C, typically 5-30°C below T_air
+        for clear skies, approaching T_air under overcast.
+
+    Notes
+    -----
+    Source: Berdahl & Martin (1984), "Emissivity of clear skies",
+    Solar Energy 32(5). Cloud correction: eps_sky increases quadratically
+    with cloud fraction toward unity at overcast.
+
+    Examples
+    --------
+    >>> sky_temp_C(np.array([25.0]), np.array([15.0]), np.array([0.0]))
+    array([...])  # several degrees below 25°C
+    """
+    T_dp = np.asarray(T_dp_C, dtype=float)
+    T_air = np.asarray(T_air_C, dtype=float)
+    N = np.clip(np.asarray(cloud_cover_octas, dtype=float) / 8.0, 0.0, 1.0)
+    eps_clear = 0.711 + 0.56 * (T_dp / 100.0) + 0.73 * (T_dp / 100.0) ** 2
+    eps_sky = eps_clear + (1.0 - eps_clear) * N ** 2
+    T_air_K = T_air + 273.15
+    T_sky_K = T_air_K * eps_sky ** 0.25
+    return T_sky_K - 273.15
+
+
 def parse_cw_weather(
     path: str,
     placement_date: str,
@@ -459,6 +540,10 @@ def parse_cw_weather(
     cloud = slice_data[:, WEATHER_COL['cloud_cover']]
     pressure = slice_data[:, WEATHER_COL['pressure_hPa']]
 
+    # Computed hourly fields
+    T_dp = dew_point_C(T_C, RH)
+    T_sky = sky_temp_C(T_C, T_dp, cloud)
+
     # Daily max/min of dry-bulb
     n_full_days = n_hours // 24
     T_air_F_days = T_air_F[:n_full_days * 24].reshape(n_full_days, 24)
@@ -473,6 +558,8 @@ def parse_cw_weather(
         wind_m_s=wind,
         cloud_cover=cloud,
         pressure_hPa=pressure,
+        T_dp_C=T_dp,
+        T_sky_C=T_sky,
         daily_max_F=daily_max_F,
         daily_min_F=daily_min_F,
         lat_deg=lat,
