@@ -13,3 +13,5 @@ venv/
 
 # Large validation outputs (comment out if you want them tracked)
 # validation/cw_exports/*/output.txt
+cw_comparison_MIX-*.png
+pr*_sanity.png
