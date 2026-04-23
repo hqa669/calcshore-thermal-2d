@@ -114,6 +114,14 @@ def test_h_convective_v2_form():
 # ============================================================
 
 def test_h_top_series_combination():
+    """Unit test of the h_top_series formula.
+
+    NOTE (M4+): h_top_series is no longer called by the solver. In M4 the
+    blanket is a physical grid row whose low k already resists heat flow;
+    applying h_top_series at y=0 double-counts that resistance. The solver now
+    uses h_convective() only at the top surface. This test validates the math
+    of h_top_series in isolation.
+    """
     wind = 10.5
     R_imp = 5.67
     h_conv = h_convective(wind)                      # 25.8
@@ -271,13 +279,19 @@ def test_menzel_suppressed_after_cure_time():
 
 @pytest.mark.xfail(
     reason=(
-        "M3 has adiabatic sides; +3.1°F excess heat due to absent lateral cooling. "
-        "Expected to pass after M4 adds form+blanket side BCs."
+        "Peak T runs ~1.0°F below CW (−1.04°F on MIX-01). Root cause: missing "
+        "solar gain during warm daytime hours suppresses the peak slightly. "
+        "Expected to pass after Sprint 1 adds solar + longwave top BC."
     ),
     strict=False,
 )
 def test_matches_cw_mix01_peak_T():
-    """M3 GATE: engine peak max T in concrete ≈ CW 129.6°F ± 1.0°F."""
+    """M4 GATE: engine peak max T in concrete ≈ CW 129.6°F ± 1.0°F.
+
+    Uses 'full_2d' mode (M4 production mode). Previously 'v2_equivalent' was used in M3,
+    but M4 geometry (air instead of soil beside concrete) changes that mode's thermal
+    character; full_2d provides the correct combined fix (top-BC + side-BC).
+    """
     pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
     from cw_scenario_loader import load_cw_scenario
 
@@ -295,7 +309,7 @@ def test_matches_cw_mix01_peak_T():
         grid, scn.mix, T_initial,
         duration_s=168 * 3600,
         output_interval_s=1800.0,
-        boundary_mode="v2_equivalent",
+        boundary_mode="full_2d",
         environment=scn.environment,
         construction=scn.construction,
     )
@@ -323,7 +337,7 @@ def test_matches_cw_mix01_peak_T():
 # ============================================================
 
 def test_matches_cw_mix01_peak_gradient():
-    """Peak gradient vs CW 39.3°F.  Expected FAIL in M3 (adiabatic sides)."""
+    """Peak gradient vs CW 39.3°F ± 2.0°F. Uses full_2d mode (M4 production)."""
     pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
     from cw_scenario_loader import load_cw_scenario
 
@@ -341,7 +355,7 @@ def test_matches_cw_mix01_peak_gradient():
         grid, scn.mix, T_initial,
         duration_s=168 * 3600,
         output_interval_s=1800.0,
-        boundary_mode="v2_equivalent",
+        boundary_mode="full_2d",
         environment=scn.environment,
         construction=scn.construction,
     )
@@ -373,15 +387,8 @@ def test_matches_cw_mix01_peak_gradient():
 # Test 10: field-wide RMS vs CW (skip if T_field_F not available)
 # ============================================================
 
-@pytest.mark.xfail(
-    reason=(
-        "M3 has adiabatic sides; field RMS 2.73°F due to absent lateral cooling. "
-        "Expected to pass after M4 adds form+blanket side BCs."
-    ),
-    strict=False,
-)
 def test_matches_cw_mix01_field_rms():
-    """Field-wide RMS < 2.0°F vs CW T_field_F (skips if not available)."""
+    """Field-wide RMS < 2.0°F vs CW T_field_F (skips if not available). Uses full_2d."""
     pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
     from cw_scenario_loader import load_cw_scenario
 
@@ -402,7 +409,7 @@ def test_matches_cw_mix01_field_rms():
         grid, scn.mix, T_initial,
         duration_s=168 * 3600,
         output_interval_s=1800.0,
-        boundary_mode="v2_equivalent",
+        boundary_mode="full_2d",
         environment=scn.environment,
         construction=scn.construction,
     )
