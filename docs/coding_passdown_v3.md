@@ -217,3 +217,38 @@ Optional but valuable:
 ## Changelog
 
 - **2026-04-22** — Initial v3 passdown authored. Sprint 0 (2D port) begins. Decisions locked in `thermal_engine_2d_design.md`.
+
+---
+
+## Sprint 0 retrospective (2026-04-22)
+
+Sprint 0 shipped. 48 tests pass, 3 xfail. MIX-01 Austin comparison:
+- Peak Max T:     128.6°F vs CW 129.6°F  (Δ=-1.0°F, boundary pass)
+- Peak Gradient:  38.3°F vs 39.3°F       (Δ=-1.0°F, pass)
+- Field RMS:      1.45°F                 (pass, tol 2.0°F)
+- Centerline RMS: 0.86°F                 (pass, tol 1.0°F)
+- Corner RMS:     4.00°F                 (fail, tol 3.0°F)
+
+### Architecture decisions finalized in Sprint 0
+- Blanket is pure R in the top BC (material_id=3 above concrete)
+- Side BC uses R_FORM_EFFECTIVE_SI = 0.0862 m²·K/W (calibrated against
+  MIX-01; interpretation: CW treats "Wet Blanket" side cure as metadata,
+  effective form R ≈ thin-liner value. Revisit in Sprint 2.)
+- Top-form corner uses quarter-cell energy balance
+- Three v2 bugs found and fixed in the port: ambient sign flip, Menzel
+  mmHg/kPa unit mismatch, ghost-node BC instability
+
+### Sprint 1 must address
+1. Peak Max T at boundary of tolerance (-1.0°F). Hypothesis: solar gain
+   during afternoon is missing, producing under-heated concrete.
+2. Peak time runs ~6 hr early vs CW. Same root cause.
+3. Corner RMS 4.0°F. Corner swings only 6°F diurnally vs CW's 10°F.
+   Back-calculation implies CW applies ~20 W/m²·K effective heat
+   transfer at corner during hot afternoons, consistent with direct
+   solar absorption on the form face.
+
+### v2 bugs to fix separately (unrelated to v3 work)
+- ambient_temp_F sign (avg - amp*cos → avg + amp*cos)
+- Menzel vapor pressure unit (mmHg → kPa before applying 0.315)
+- Re-run 15-mix validation after fix; expect blanket_r_effective and
+  Hu_factor calibrations to need adjustment
