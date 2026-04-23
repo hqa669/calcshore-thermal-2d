@@ -115,6 +115,12 @@ FORM_R_SI = 0.0   # m²·K/W
 # wood forms override this constant before calling the solver.
 R_FORM_EFFECTIVE_SI = 0.0862   # m²·K/W  (= 0.490 hr·ft²·°F/BTU × 0.1761)
 
+# Solar absorptivity and emissivity defaults for the top concrete surface.
+# absorptivity: ASHRAE default for light-gray concrete/steel form.
+# emissivity: unused in PR 2; PR 3 adds explicit longwave.
+SOLAR_ABSORPTIVITY_DEFAULT = 0.65
+EMISSIVITY_DEFAULT = 0.88
+
 # Default material properties for non-concrete zones
 SOIL_PROPERTIES_2D: dict = {'k': 1.50, 'rho': 2100.0, 'Cp': 900.0}
 BLANKET_PROPERTIES_2D: dict = {'rho': 100.0, 'Cp': 1500.0}
@@ -344,11 +350,15 @@ def menzel_evaporation(t_hrs: float, T_surface_C: float, T_air_C: float,
     return q_evap
 
 
-def h_convective(wind_m_s_max: float) -> float:
-    """Convection coefficient with baked-in longwave equivalent term.
+def h_forced_convection(wind_m_s_max: float) -> float:
+    """Pure forced-convection coefficient for the top surface.
 
-    Matches reference/thermal_engine_v2.py:591. Applies 0.4× wind derating
-    internally to convert avg-max wind to effective surface wind.
+    Does NOT include a longwave-equivalent term; longwave is handled
+    explicitly in PR 3. For legacy regression/ablation modes that expect
+    the combined coefficient, use _h_convective_legacy instead.
+
+    Applies 0.4× wind derating internally to convert avg-max wind to
+    effective surface wind, matching reference/thermal_engine_v2.py:591.
 
     Parameters
     ----------
@@ -356,19 +366,44 @@ def h_convective(wind_m_s_max: float) -> float:
 
     Returns
     -------
-    float  Effective heat transfer coefficient W/(m²·K).
+    float  Forced-convection heat transfer coefficient W/(m²·K).
+    """
+    return 5.6 + 3.5 * (0.4 * wind_m_s_max)
+
+
+def _h_convective_legacy(wind_m_s_max: float) -> float:
+    """LEGACY: convection with baked-in longwave equivalent (+5.5 W/(m²·K)).
+
+    DO NOT USE for new validation. Preserved for regression/ablation
+    testing of top_bc_only and v2_equivalent boundary modes only.
+    Production path is h_forced_convection + explicit LW in full_2d mode.
+
+    Formula: h = 5.6 + 3.5*(0.4*wind) + 5.5 (the trailing 5.5 is an
+    empirical longwave-equivalent term from v2).
+
+    Parameters
+    ----------
+    wind_m_s_max : float  Average-max wind speed m/s.
+
+    Returns
+    -------
+    float  Combined convection + LW-equivalent coefficient W/(m²·K).
     """
     return 5.6 + 3.5 * (0.4 * wind_m_s_max) + 5.5
 
 
 def h_top_series(wind_m_s_max: float, blanket_R_imp: float) -> float:
-    """Series-resistance combination of convection + cure blanket.
+    """Series-resistance combination of pure forced-convection + cure blanket.
 
     NOTE (M4+): This function is no longer called by the solver. In M4 the
-    blanket is a physical grid row whose low k already resists heat flow;
-    using h_top_series at y=0 would double-count that resistance. The solver
-    now applies h_convective() at the top surface only. This function remains
-    as a unit-tested mathematical reference.
+    blanket is modelled as pure-R resistance in full_2d mode; the solver
+    precomputes _h_top_combined directly. This function is retained as a
+    unit-tested mathematical reference (pure forced-convection + blanket R,
+    no LW-equivalent term).
+
+    NOTE (PR 2+): Uses h_forced_convection (no +5.5 LW term). The legacy
+    formula (with +5.5) is h_top_series with _h_convective_legacy, which the
+    solver precomputes as _h_top_legacy for top_bc_only / v2_equivalent modes.
 
     Parameters
     ----------
@@ -379,7 +414,7 @@ def h_top_series(wind_m_s_max: float, blanket_R_imp: float) -> float:
     -------
     float  Effective top-surface heat transfer coefficient W/(m²·K).
     """
-    h_conv = h_convective(wind_m_s_max)
+    h_conv = h_forced_convection(wind_m_s_max)
     R_blanket_SI = blanket_R_imp * R_IMP_TO_R_SI  # m²·K/W
     return 1.0 / (1.0 / h_conv + R_blanket_SI)
 
@@ -406,29 +441,43 @@ def h_side_convective(wind_m_s_max: float, blanket_R_imp: float = 0.0) -> float:
     -------
     float  Effective side-surface heat transfer coefficient W/(m²·K).
     """
-    return 1.0 / (1.0 / h_convective(wind_m_s_max) + R_FORM_EFFECTIVE_SI)
+    return 1.0 / (1.0 / h_forced_convection(wind_m_s_max) + R_FORM_EFFECTIVE_SI)
 
 
 # Adapted from reference/thermal_engine_v2.py:197-203.
 # Change: placement_hour passed as explicit argument (lives on CWConstruction
 # in this project, not CWEnvironment).
-# Change: sign corrected to `+amp * cos(...)` so maximum is at h=15 (3 PM)
+# Change (PR 2): when env.T_air_F is populated, use hourly linear interpolation
+# instead of the sinusoidal formula. The sinusoid remains as a fallback for
+# test fixtures that construct minimal CWEnvironment objects without weather data.
+# Original sign correction note: `+amp * cos(...)` so maximum is at h=15 (3 PM)
 # and minimum at h=3 (3 AM), matching physical reality and CW ambient output.
-# v2's formula uses `-amp * cos(...)` which inverts peak/trough; the correction
-# here was confirmed by comparing against CW's T_ambient_F series for MIX-01.
 def ambient_temp_F(t_hrs: float, env, placement_hour: int) -> float:
-    """Sinusoidal diurnal ambient temperature. Peak at 3 PM, min at ~3 AM.
+    """Ambient temperature at time t_hrs since placement, in °F.
+
+    When env.T_air_F is populated (hourly weather data loaded), returns
+    linearly interpolated value from the hourly array. Otherwise falls
+    back to sinusoidal daily min/max formula.
+
+    The hourly path is the production path for CW-loaded scenarios; the
+    sinusoidal fallback exists only for synthetic test fixtures.
 
     Parameters
     ----------
     t_hrs : float        Hours since concrete placement.
-    env : duck-typed     Must have daily_max_F, daily_min_F (per-day lists).
+    env : duck-typed     For hourly path: must have T_air_F, hours (aligned).
+                         For sinusoidal fallback: must have daily_max_F,
+                         daily_min_F (per-day lists).
     placement_hour : int Hour of day (0–23) when placement started.
+                         Unused on the hourly path (t_hrs=0 maps to placement).
 
     Returns
     -------
     float  Ambient temperature in °F.
     """
+    if getattr(env, 'T_air_F', None) is not None and np.asarray(env.T_air_F).size > 0:
+        return float(np.interp(t_hrs, env.hours, env.T_air_F))
+    # Sinusoidal fallback for test fixtures without weather data:
     h = (placement_hour + t_hrs) % 24.0
     d = min(int((placement_hour + t_hrs) / 24.0), len(env.daily_max_F) - 1)
     avg = (env.daily_max_F[d] + env.daily_min_F[d]) / 2
@@ -492,6 +541,15 @@ class HydrationResult:
     # M3 diagnostic fields — None when boundary_mode is 'adiabatic' or 'dirichlet'
     top_flux_W_m2_history: np.ndarray | None = None  # shape (n_out, nx) surface heat loss
     T_amb_C_history: np.ndarray | None = None        # shape (n_out,) ambient air temperature
+    # PR 2 solar diagnostics — both None when diagnostic_outputs=False or non-full_2d mode.
+    # q_solar_history         : flux that ENTERS the concrete after blanket attenuation
+    #                           = −α·G·f  where f = h_top_combined/h_forced_convection ≈ 0.047
+    #                           Use this for the PR 4 total-top-flux panel; it is additive with
+    #                           q_conv and q_lw (PR 3) which are all expressed at the concrete face.
+    # q_solar_incident_history: raw absorbed flux at the blanket outer surface = −α·G
+    #                           Use this for validation against measured/CW solar inputs.
+    q_solar_history: np.ndarray | None = None           # (n_out, nx) W/m²; negative = heat in
+    q_solar_incident_history: np.ndarray | None = None  # (n_out, nx) W/m²; negative = heat in
 
 
 @dataclass
@@ -1018,6 +1076,10 @@ def solve_hydration_2d(
     # Debug flag: force blanket-as-pure-R in non-full_2d modes for ablation
     # tests.  For full_2d this is always True (permanent M4 architecture).
     skip_blanket_node: bool = False,
+    # Gate detailed per-sample flux histories.  Set False for memory-sensitive
+    # long runs.  PR 2 gates q_solar_history only; PR 4 will extend this gate
+    # to top_flux_W_m2_history and T_amb_C_history.
+    diagnostic_outputs: bool = True,
 ) -> HydrationResult:
     """Explicit 2D conduction solver with hydration heat and variable properties.
 
@@ -1098,12 +1160,16 @@ def solve_hydration_2d(
     _use_top_bc = boundary_mode in _TOP_BC_MODES
     if _use_top_bc:
         _r_blanket = getattr(construction, "blanket_R_value", blanket_R_value)
-        # M4 fix: use h_convective at y=0 only (blanket R is already represented
-        # by the blanket node's low k; h_top_series double-counted it).
-        _h_conv_top = h_convective(environment.cw_ave_max_wind_m_s)
-        # Legacy: h_top_series still used by top_bc_only / v2_equivalent modes
-        # which were written before the grid had an explicit blanket row.
-        _h_top_legacy = h_top_series(environment.cw_ave_max_wind_m_s, _r_blanket)
+        _R_blanket_SI = _r_blanket * R_IMP_TO_R_SI  # m²·K/W
+        # PR 2: h_forced_convection (no +5.5 LW term) is the production coefficient.
+        # _h_top_combined = forced_conv + blanket R in series → used by full_2d.
+        # _h_top_legacy   = legacy conv (+5.5 LW) + blanket R → used by top_bc_only /
+        #                    v2_equivalent to preserve pre-PR-2 numeric behaviour.
+        _h_conv_top     = h_forced_convection(environment.cw_ave_max_wind_m_s)  # kept for non-blanket branch
+        _h_top_combined = 1.0 / (1.0 / h_forced_convection(environment.cw_ave_max_wind_m_s) + _R_blanket_SI)
+        _h_top_legacy   = 1.0 / (1.0 / _h_convective_legacy(environment.cw_ave_max_wind_m_s) + _R_blanket_SI)
+        # Solar absorptivity for the top concrete surface (PR 2).
+        _alpha_sol_top  = getattr(construction, "solar_absorptivity_top", SOLAR_ABSORPTIVITY_DEFAULT)
         _wind_eff = environment.cw_ave_max_wind_m_s * 0.4  # v2 derating
         _RH_frac = 0.005 * (environment.cw_ave_max_RH_pct + environment.cw_ave_min_RH_pct)
         _cure_time = getattr(construction, "top_cure_blanket_time_hrs", 2.0)
@@ -1217,9 +1283,17 @@ def solve_hydration_2d(
     if _use_top_bc:
         top_flux_out = np.empty((n_samples, nx), dtype=np.float64)
         T_amb_out    = np.empty(n_samples, dtype=np.float64)
+        if diagnostic_outputs and boundary_mode == "full_2d":
+            q_solar_out          = np.empty((n_samples, nx), dtype=np.float64)
+            q_solar_incident_out = np.empty((n_samples, nx), dtype=np.float64)
+        else:
+            q_solar_out          = None
+            q_solar_incident_out = None
     else:
-        top_flux_out = None
-        T_amb_out    = None
+        top_flux_out         = None
+        T_amb_out            = None
+        q_solar_out          = None
+        q_solar_incident_out = None
 
     # ------------------------------------------------------------------ #
     # H. Initial conditions                                                #
@@ -1236,6 +1310,9 @@ def solve_hydration_2d(
         _T_amb_C_0 = (_T_amb_F_0 - 32.0) * 5.0 / 9.0
         T_amb_out[0]    = _T_amb_C_0
         top_flux_out[0] = np.zeros(nx)   # no flux at t=0 (no stencil yet)
+        if q_solar_out is not None:
+            q_solar_out[0]          = np.zeros(nx)  # no solar at t=0 (no stencil yet)
+            q_solar_incident_out[0] = np.zeros(nx)
     next_idx = 1
 
     n_steps = 0
@@ -1300,8 +1377,9 @@ def solve_hydration_2d(
         )
 
         # Diagnostic placeholders (defined for all modes; populated by top-BC paths)
-        _T_amb_C = 0.0
-        _q_top   = np.zeros(nx)
+        _T_amb_C       = 0.0
+        _q_top         = np.zeros(nx)
+        _q_solar_array = np.zeros(nx)  # PR 2 solar flux; zero unless full_2d with solar
 
         # -- Boundary conditions --
         if boundary_mode == "adiabatic":
@@ -1325,10 +1403,8 @@ def solve_hydration_2d(
             # (a) Top surface BC
             if _use_pure_r_blanket:
                 # M4 full_2d: blanket is pure-R.  Apply combined BC at concrete top (j=1)
-                # using h_top_series(wind, blanket_R) — the combined resistance of convection
-                # and blanket in series, now applied directly to the concrete surface since
-                # the blanket node carries no thermal mass.
-                _h_top_combined = _h_top_legacy  # = h_top_series(wind, blanket_R)
+                # using _h_top_combined (h_forced_convection + blanket R in series).
+                # PR 2 also adds solar absorption q_sw = -alpha_sol * G(t).
                 _j_top = grid.iy_concrete_start   # j=1
                 _dy_conc_top = float(grid.y[_j_top + 1] - grid.y[_j_top])
                 _dy_half_c   = _dy_conc_top / 2.0
@@ -1341,7 +1417,61 @@ def solve_hydration_2d(
                             t_hrs, float(_T_surf_c[_i]), _T_amb_C,
                             _RH_frac, _wind_eff
                         )
-                _q_top_c   = _q_conv_c + _q_evap_c
+                # ── Blanket-surface quasi-steady energy balance ─────────────────────
+                # The cure blanket is pure thermal resistance R_blanket [m²·K/W].
+                # Solar radiation (and PR 3 longwave) is absorbed at the OUTER surface of
+                # the blanket, not at the concrete.  The outer surface has no thermal mass
+                # (pure-R model), so it is in quasi-steady state every time step.
+                #
+                # Setting net flux = 0 on the outer blanket surface (sign convention:
+                # positive = leaving the surface):
+                #
+                #   h_conv·(T_outer − T_amb)        [convection to air]
+                # + (T_outer − T_concrete)/R_blanket [conduction to concrete]
+                # − α·G                              [absorbed solar, heat in]
+                # = 0
+                #
+                # Solving for the downward flux into concrete:
+                #
+                #   q_down = (T_outer − T_concrete)/R_blanket
+                #          = [α·G − h_conv·(T_concrete − T_amb)] / (h_conv·R_blanket + 1)
+                #
+                # Since h_top_combined = h_conv/(h_conv·R_blanket + 1), this simplifies to:
+                #
+                #   q_down = (h_top_combined/h_conv)·α·G
+                #            − h_top_combined·(T_concrete − T_amb)
+                #
+                # The second term is already _q_conv_c.  The first term is the solar
+                # contribution reaching the concrete, attenuated by factor
+                #
+                #   f = h_top_combined / h_forced_convection
+                #
+                # MIX-01 Austin: h_conv ≈ 20.3, R_blanket ≈ 0.998, h_top ≈ 0.954 W/(m²·K)
+                #   f ≈ 0.047  →  ~4.7% of α·G reaches the concrete.
+                #   Peak solar 837 W/m² → α·G ≈ 544 W/m² incident, ~25 W/m² to concrete.
+                #
+                # PR 3 LONGWAVE: the same f applies.  Net LW at the blanket outer surface
+                # (σε(T_sky⁴ − T_outer⁴), linearised as h_rad·(T_sky − T_outer)) is
+                # attenuated by f before reaching the concrete.  Use:
+                #   q_lw_effective = q_lw_incident · f
+                # PR 3 must compute radiative emission using T_outer (solved from the
+                # quasi-steady blanket balance above), not T_concrete directly, because
+                # during sunlit hours T_outer >> T_concrete and during nighttime
+                # T_outer << T_concrete — using T_concrete as the emitter gives the
+                # wrong radiative flux sign and magnitude.
+                # ─────────────────────────────────────────────────────────────────────
+                _solar_W_m2 = getattr(environment, 'solar_W_m2', None)
+                _env_hours  = getattr(environment, 'hours', None)
+                if _solar_W_m2 is not None and len(_solar_W_m2) > 0:
+                    _G_t = float(np.interp(t_hrs, _env_hours, _solar_W_m2))
+                else:
+                    _G_t = 0.0
+                # Incident flux at blanket outer surface (negative = heat into system)
+                _q_solar_scalar   = -_alpha_sol_top * _G_t
+                _q_solar_incident = np.where(grid.is_air[_j_top, :], 0.0, _q_solar_scalar)
+                # Attenuated flux reaching concrete surface: multiply by f = h_top/h_conv
+                _q_solar_eff      = _q_solar_incident * (_h_top_combined / _h_conv_top)
+                _q_top_c   = _q_conv_c + _q_evap_c + _q_solar_eff
                 _q_cond_c  = k_y_face[_j_top, :] * (T[_j_top + 1, :] - _T_surf_c) / _dy_conc_top
                 T_new[_j_top, :] = np.where(
                     grid.is_air[_j_top, :],
@@ -1437,8 +1567,10 @@ def solve_hydration_2d(
             _q_r   = _k_right * (T[_jc, _ic + 1] - _T_c) / dx          # W/m² in from right
             _q_b   = _k_below * (T[_jc + 1, _ic] - _T_c) / _dy_full    # W/m² in from below
 
-            # Top surface loss via combined coefficient (blanket R + convection in series)
-            _q_top_c = _h_top_legacy * (_T_c - _T_amb_C)
+            # Top surface loss via combined coefficient (h_forced_convection + blanket R)
+            # PR 2 uses _h_top_combined (forced conv, no LW) consistent with the rest of
+            # full_2d. Corner solar is deferred to PR 4.
+            _q_top_c = _h_top_combined * (_T_c - _T_amb_C)
             if t_hrs < _cure_time:
                 _q_top_c += menzel_evaporation(
                     t_hrs, float(_T_c), _T_amb_C, _RH_frac, _wind_eff
@@ -1470,9 +1602,9 @@ def solve_hydration_2d(
             T_new[grid.is_air] = T_initial_C[grid.is_air]
 
         else:
-            # top_bc_only or v2_equivalent — legacy top flux BC
-            # Uses h_top_series (convection + blanket R in series) which was the
-            # M3 formulation. Kept for ablation / debugging comparisons.
+            # LEGACY MODE — do not use for new validation.  Preserves pre-PR-2
+            # convection (+5.5 LW-equivalent baked in) for regression / ablation runs.
+            # Uses _h_top_legacy (= _h_convective_legacy + blanket R in series).
             t_hrs = t / 3600.0
             _T_amb_F = ambient_temp_F(t_hrs, environment, _placement_hour)
             _T_amb_C = (_T_amb_F - 32.0) * 5.0 / 9.0
@@ -1523,6 +1655,20 @@ def solve_hydration_2d(
             if _use_top_bc:
                 top_flux_out[next_idx] = _q_top
                 T_amb_out[next_idx]    = _T_amb_C
+                if q_solar_out is not None:
+                    # Recompute at exact sample time (BC was computed at t-dt).
+                    _jt  = grid.iy_concrete_start
+                    _sol = getattr(environment, 'solar_W_m2', None)
+                    _hrs = getattr(environment, 'hours', None)
+                    if _sol is not None and len(_sol) > 0:
+                        _G_s      = float(np.interp(t / 3600.0, _hrs, _sol))
+                        _inc_s    = np.where(grid.is_air[_jt, :], 0.0, -_alpha_sol_top * _G_s)
+                        _atten_s  = _inc_s * (_h_top_combined / _h_conv_top)
+                    else:
+                        _inc_s   = np.zeros(nx)
+                        _atten_s = np.zeros(nx)
+                    q_solar_out[next_idx]          = _atten_s   # flux entering concrete
+                    q_solar_incident_out[next_idx] = _inc_s     # raw at blanket outer surface
             next_idx += 1
 
     # ------------------------------------------------------------------ #
@@ -1546,4 +1692,6 @@ def solve_hydration_2d(
         centerline_T_C=T_out[:, :, -1],
         top_flux_W_m2_history=top_flux_out,
         T_amb_C_history=T_amb_out,
+        q_solar_history=q_solar_out,
+        q_solar_incident_history=q_solar_incident_out,
     )

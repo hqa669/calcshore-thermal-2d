@@ -19,7 +19,8 @@ from thermal_engine_2d import (
     build_grid_half_mat,
     build_grid_rectangular,
     compute_T_gw_C,
-    h_convective,
+    h_forced_convection,
+    _h_convective_legacy,
     h_side_convective,
     h_top_series,
     menzel_evaporation,
@@ -147,23 +148,26 @@ def test_air_region_not_solved():
 # ============================================================
 
 def test_h_side_combination():
-    """h_side_convective = 1 / (1/h_conv + R_FORM_EFFECTIVE_SI) ≈ 8 W/(m²·K).
+    """h_side_convective = 1 / (1/h_forced + R_FORM_EFFECTIVE_SI) ≈ 7.4 W/(m²·K).
 
+    PR 2: h_side_convective now uses h_forced_convection (no +5.5 LW term),
+    giving h_forced(10.5) = 20.3 W/(m²·K) and h_side ≈ 7.4.
     R_FORM_EFFECTIVE_SI is the empirically calibrated effective form-face
-    resistance (≈ 0.0862 m²·K/W = 0.490 hr·ft²·°F/BTU), giving h_side ≈ 8.
+    resistance (≈ 0.0862 m²·K/W = 0.490 hr·ft²·°F/BTU).
     The cure blanket is a top-surface treatment only; blanket_R_imp is
     accepted but does not affect the side BC.
     """
     from thermal_engine_2d import R_FORM_EFFECTIVE_SI
     wind = 10.5
     R_imp = 5.67          # passed but ignored per function contract
-    h_conv = h_convective(wind)     # 25.8 W/(m²·K)
+    h_conv = h_forced_convection(wind)   # 20.3 W/(m²·K) — no +5.5 LW term
     h_side_expected = 1.0 / (1.0 / h_conv + R_FORM_EFFECTIVE_SI)
 
     h_side = h_side_convective(wind, R_imp)
     assert h_side == pytest.approx(h_side_expected, rel=1e-5)
-    assert h_side == pytest.approx(8.0, abs=0.1), (
-        f"h_side should be ≈ 8.0 W/(m²·K) with R_FORM_EFFECTIVE_SI={R_FORM_EFFECTIVE_SI:.4f}"
+    # h_side ≈ 7.4 W/(m²·K) with forced-convection (was ≈ 8.0 with legacy +5.5)
+    assert h_side == pytest.approx(7.4, abs=0.1), (
+        f"h_side should be ≈ 7.4 W/(m²·K) with R_FORM_EFFECTIVE_SI={R_FORM_EFFECTIVE_SI:.4f}"
     )
 
 

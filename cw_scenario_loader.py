@@ -170,6 +170,8 @@ class CWConstruction:
     placement_date: str = "2026/7/15"
 
     blanket_R_value: float = 5.67
+    solar_absorptivity_top: float = 0.65   # ASHRAE default for light-gray concrete/steel
+    emissivity_top: float = 0.88            # unused in PR 2; added now to avoid amending twice
     form_removal_hrs: float = 168.0
     form_color: str = "Red"
     form_type: str = "Steel"

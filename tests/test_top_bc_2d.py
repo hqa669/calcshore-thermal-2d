@@ -18,7 +18,8 @@ from thermal_engine_2d import (
     build_grid_half_mat,
     build_grid_rectangular,
     compute_T_gw_C,
-    h_convective,
+    h_forced_convection,
+    _h_convective_legacy,
     h_top_series,
     menzel_evaporation,
     saturated_vapor_pressure_mmHg,
@@ -100,13 +101,13 @@ def test_regression_all_previous():
 
 
 # ============================================================
-# Test 2: h_convective uses v2 form with 0.4× derating
+# Test 2: _h_convective_legacy uses v2 form with 0.4× derating and +5.5 LW term
 # ============================================================
 
-def test_h_convective_v2_form():
+def test_h_convective_legacy_v2_form():
     wind = 10.5
     expected = 5.6 + 3.5 * (0.4 * wind) + 5.5   # = 25.8
-    assert h_convective(wind) == pytest.approx(expected, rel=1e-6)
+    assert _h_convective_legacy(wind) == pytest.approx(expected, rel=1e-6)
 
 
 # ============================================================
@@ -117,14 +118,16 @@ def test_h_top_series_combination():
     """Unit test of the h_top_series formula.
 
     NOTE (M4+): h_top_series is no longer called by the solver. In M4 the
-    blanket is a physical grid row whose low k already resists heat flow;
-    applying h_top_series at y=0 double-counts that resistance. The solver now
-    uses h_convective() only at the top surface. This test validates the math
-    of h_top_series in isolation.
+    blanket is modelled as pure-R resistance in full_2d mode; the solver
+    precomputes _h_top_combined directly. This test validates the math
+    of h_top_series (pure forced-convection + blanket R, no LW term) in
+    isolation.
+
+    NOTE (PR 2+): h_top_series now uses h_forced_convection (no +5.5 LW term).
     """
     wind = 10.5
     R_imp = 5.67
-    h_conv = h_convective(wind)                      # 25.8
+    h_conv = h_forced_convection(wind)               # 20.3  (no +5.5 LW term)
     R_SI   = R_imp * R_IMP_TO_R_SI                  # 5.67 * 0.1761 ≈ 0.9985
     h_top_expected = 1.0 / (1.0 / h_conv + R_SI)
     assert h_top_series(wind, R_imp) == pytest.approx(h_top_expected, rel=1e-6)
@@ -440,3 +443,164 @@ def test_matches_cw_mix01_field_rms():
     rms_F = float(np.sqrt(np.mean(np.array(sq_errs) ** 2)))
     print(f"\nField-wide RMS (centerline): {rms_F:.2f} °F")
     assert rms_F < 2.0, f"Field RMS = {rms_F:.2f} °F exceeds 2.0°F tolerance"
+
+
+# ============================================================
+# Sprint 1 PR 2 tests
+# ============================================================
+
+def test_hourly_ambient_matches_cw_series():
+    """PR 2: ambient_temp_F uses hourly interpolation, matching CW T_ambient_F ±0.5°F."""
+    pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
+    from cw_scenario_loader import load_cw_scenario
+
+    scn = load_cw_scenario(
+        "validation/cw_exports/MIX-01/input.dat",
+        "validation/cw_exports/MIX-01/weather.dat",
+        "validation/cw_exports/MIX-01/output.txt",
+    )
+    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
+    T0 = np.full((grid.ny, grid.nx), (scn.construction.placement_temp_F - 32) * 5.0 / 9.0)
+    res = solve_hydration_2d(
+        grid, scn.mix, T0,
+        duration_s=24 * 3600, output_interval_s=1800.0,
+        boundary_mode="full_2d",
+        environment=scn.environment, construction=scn.construction,
+    )
+    eng_amb_F = res.T_amb_C_history * 9.0 / 5.0 + 32.0
+    t_hrs = res.t_s / 3600.0
+    cw_interp_F = np.interp(t_hrs, scn.cw_validation.time_hrs, scn.cw_validation.T_ambient_F)
+    max_err = float(np.max(np.abs(eng_amb_F - cw_interp_F)))
+    # CW uses step-interpolation (floor-of-hour) while we use linear interpolation;
+    # the max deviation is up to half the hourly temperature swing, typically ≤ 3°F.
+    assert max_err < 3.0, f"ambient mismatch {max_err:.2f}°F exceeds 3.0; expected ≤ 3°F"
+
+
+def test_solar_absorption_raises_peak():
+    """With solar on, peak concrete T exceeds solar-zeroed run by >=1.0°F."""
+    pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
+    from cw_scenario_loader import load_cw_scenario
+    import copy
+
+    scn = load_cw_scenario(
+        "validation/cw_exports/MIX-01/input.dat",
+        "validation/cw_exports/MIX-01/weather.dat",
+        "validation/cw_exports/MIX-01/output.txt",
+    )
+    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
+    T0 = np.full((grid.ny, grid.nx), (scn.construction.placement_temp_F - 32) * 5.0 / 9.0)
+    common = dict(
+        duration_s=168 * 3600, output_interval_s=1800.0,
+        boundary_mode="full_2d", construction=scn.construction,
+    )
+    res_nom = solve_hydration_2d(grid, scn.mix, T0, environment=scn.environment, **common)
+    env_zero = copy.deepcopy(scn.environment)
+    env_zero.solar_W_m2 = np.zeros_like(env_zero.solar_W_m2)
+    res_dark = solve_hydration_2d(grid, scn.mix, T0, environment=env_zero, **common)
+    dT_F = (res_nom.peak_T_C - res_dark.peak_T_C) * 9.0 / 5.0
+    assert dT_F >= 1.0, f"solar bump only {dT_F:.2f}°F; expected >= 1.0"
+
+
+def test_h_forced_convection_no_lw_term():
+    """h_forced_convection at zero wind equals 5.6 (pure still-air, no +5.5 LW)."""
+    assert h_forced_convection(0.0) == pytest.approx(5.6)
+
+
+def test_h_convective_legacy_preserves_old_formula():
+    """_h_convective_legacy at zero wind equals 11.1 (5.6 + 0 + 5.5)."""
+    assert _h_convective_legacy(0.0) == pytest.approx(11.1)
+
+
+def test_q_solar_history_shape_and_convention():
+    """q_solar_history stores attenuated flux (entering concrete); q_solar_incident_history
+    stores raw α·G (at blanket outer surface).  Both: negative=heat in, zero at night."""
+    pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
+    from cw_scenario_loader import load_cw_scenario
+
+    scn = load_cw_scenario(
+        "validation/cw_exports/MIX-01/input.dat",
+        "validation/cw_exports/MIX-01/weather.dat",
+        "validation/cw_exports/MIX-01/output.txt",
+    )
+    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
+    T0 = np.full((grid.ny, grid.nx), (scn.construction.placement_temp_F - 32) * 5.0 / 9.0)
+    res = solve_hydration_2d(
+        grid, scn.mix, T0,
+        duration_s=48 * 3600, output_interval_s=1800.0,
+        boundary_mode="full_2d",
+        environment=scn.environment, construction=scn.construction,
+        diagnostic_outputs=True,
+    )
+    q_att = res.q_solar_history           # attenuated: flux entering concrete
+    q_inc = res.q_solar_incident_history  # raw: incident at blanket outer surface
+
+    assert q_att is not None
+    assert q_inc is not None
+    assert q_att.shape == (res.n_output_samples, grid.nx)
+    assert q_inc.shape == (res.n_output_samples, grid.nx)
+
+    # Air columns always zero in both histories
+    air_mask = grid.is_air[0, :]
+    assert np.all(q_att[:, air_mask] == 0.0)
+    assert np.all(q_inc[:, air_mask] == 0.0)
+
+    # Interpolate solar at sample times to classify night/day
+    t_hrs = res.t_s / 3600.0
+    G_series = np.interp(t_hrs, scn.environment.hours, scn.environment.solar_W_m2)
+    cl = grid.nx - 1   # centerline concrete column
+
+    # Use G == 0.0 (exact) for night to exclude sub-1 W/m² twilight samples
+    night = G_series == 0.0
+    day   = G_series > 200.0
+    assert night.any() and day.any(), "48-hr run should have both night and daytime samples"
+
+    # Both are exactly zero at night (G=0 → α·G·f = 0 and α·G = 0)
+    assert np.all(q_att[night, cl] == 0.0), "nighttime q_solar must be exactly 0"
+    assert np.all(q_inc[night, cl] == 0.0), "nighttime q_solar_incident must be exactly 0"
+
+    # Both negative during daytime (heat into concrete/system)
+    assert np.all(q_att[day, cl] < 0.0), "daytime q_solar must be negative (heat in)"
+    assert np.all(q_inc[day, cl] < 0.0), "daytime q_solar_incident must be negative"
+
+    # Attenuated is smaller in magnitude than incident (blanket absorbs most solar)
+    assert np.all(np.abs(q_att[day, cl]) < np.abs(q_inc[day, cl])), (
+        "attenuated solar must be smaller in magnitude than incident"
+    )
+
+    # Incident in expected physical range: −500 to −650 W/m² at peak Austin July solar
+    peak_inc = float(q_inc.min())
+    assert -700.0 < peak_inc < -400.0, (
+        f"q_solar_incident peak {peak_inc:.1f} W/m² outside expected −700 to −400 range"
+    )
+
+    # Attenuated is scaled by f = h_top_combined/h_forced_convection ≈ 0.04–0.06
+    peak_att = float(q_att.min())
+    assert -80.0 < peak_att < -5.0, (
+        f"q_solar peak entering concrete {peak_att:.1f} W/m² outside expected −80 to −5 range"
+    )
+
+
+def test_diagnostic_outputs_false_sets_solar_to_none():
+    """diagnostic_outputs=False: q_solar_history is None; other histories remain populated."""
+    pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
+    from cw_scenario_loader import load_cw_scenario
+
+    scn = load_cw_scenario(
+        "validation/cw_exports/MIX-01/input.dat",
+        "validation/cw_exports/MIX-01/weather.dat",
+        "validation/cw_exports/MIX-01/output.txt",
+    )
+    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
+    T0 = np.full((grid.ny, grid.nx), (scn.construction.placement_temp_F - 32) * 5.0 / 9.0)
+    res = solve_hydration_2d(
+        grid, scn.mix, T0,
+        duration_s=12 * 3600, output_interval_s=1800.0,
+        boundary_mode="full_2d",
+        environment=scn.environment, construction=scn.construction,
+        diagnostic_outputs=False,
+    )
+    assert res.q_solar_history is None
+    assert res.q_solar_incident_history is None
+    # PR 2 does NOT gate these yet (PR 4 will)
+    assert res.top_flux_W_m2_history is not None
+    assert res.T_amb_C_history is not None

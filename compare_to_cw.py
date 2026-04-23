@@ -249,7 +249,8 @@ def main():
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
-                   val, cw_center_F, cw_corner_F, grad_series, d)
+                   val, cw_center_F, cw_corner_F, grad_series, d,
+                   result=result, grid=grid)
     except ImportError:
         pass  # silently skip if matplotlib not installed
     except Exception:
@@ -259,53 +260,82 @@ def main():
 
 
 def _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
-               val, cw_center_F, cw_corner_F, grad_series, scenario_dir):
+               val, cw_center_F, cw_corner_F, grad_series, scenario_dir,
+               result=None, grid=None):
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    fig, axes = plt.subplots(3, 3, figsize=(15, 12))
     fig.suptitle("CalcShore Engine vs CW MIX-01 Austin", fontsize=13)
 
+    # Row 1 — (a) Peak T center core
     ax = axes[0, 0]
     ax.plot(t_hrs, eng_center_F, label="Engine center", color="tab:blue")
     if cw_center_F is not None and val.time_hrs is not None:
         ax.plot(val.time_hrs, cw_center_F, "--", label="CW center", color="tab:orange")
     ax.axhline(engine_peak_max_F, color="tab:blue", alpha=0.3, linestyle=":")
-    ax.set_xlabel("t (hr)"); ax.set_ylabel("T (°F)"); ax.set_title("Peak T — centerline core")
+    ax.set_xlabel("t (hr)"); ax.set_ylabel("T (°F)"); ax.set_title("(a) Peak T — centerline core")
     ax.legend(fontsize=8)
 
+    # Row 1 — (b) Min T cross-section
     ax = axes[0, 1]
-    ax.plot(t_hrs, val.T_min_xs_F if hasattr(val, "T_min_xs_F") and val.T_min_xs_F is not None else t_hrs * 0, label="CW min xs", color="tab:orange")
-    ax.set_xlabel("t (hr)"); ax.set_ylabel("T (°F)"); ax.set_title("Min T cross-section")
+    if hasattr(val, "T_min_xs_F") and val.T_min_xs_F is not None:
+        ax.plot(val.time_hrs, val.T_min_xs_F, label="CW min xs", color="tab:orange")
+    ax.set_xlabel("t (hr)"); ax.set_ylabel("T (°F)"); ax.set_title("(b) Min T cross-section")
+    ax.legend(fontsize=8)
 
+    # Row 1 — (c) Peak Gradient
     ax = axes[0, 2]
     ax.plot(t_hrs, grad_series, label="Engine grad", color="tab:blue")
     if val.T_diff_xs_F is not None:
         ax.plot(val.time_hrs, val.T_diff_xs_F, "--", label="CW grad", color="tab:orange")
     ax.axhline(39.3, linestyle=":", color="gray", alpha=0.5)
-    ax.set_xlabel("t (hr)"); ax.set_ylabel("ΔT (°F)"); ax.set_title("Peak gradient")
+    ax.set_xlabel("t (hr)"); ax.set_ylabel("ΔT (°F)"); ax.set_title("(c) Peak gradient")
     ax.legend(fontsize=8)
 
+    # Row 2 — (d) Centerline core T(t)
     ax = axes[1, 0]
     ax.plot(t_hrs, eng_center_F, label="Engine center", color="tab:blue")
     if cw_center_F is not None:
         ax.plot(val.time_hrs, cw_center_F, "--", label="CW center", color="tab:orange")
-    ax.set_xlabel("t (hr)"); ax.set_ylabel("T (°F)"); ax.set_title("Centerline core T")
+    ax.set_xlabel("t (hr)"); ax.set_ylabel("T (°F)"); ax.set_title("(d) Centerline core T(t)")
     ax.legend(fontsize=8)
 
+    # Row 2 — (e) Corner surface T(t)
     ax = axes[1, 1]
     ax.plot(t_hrs, eng_corner_F, label="Engine corner", color="tab:blue")
     if cw_corner_F is not None:
         ax.plot(val.time_hrs, cw_corner_F, "--", label="CW corner", color="tab:orange")
-    ax.set_xlabel("t (hr)"); ax.set_ylabel("T (°F)"); ax.set_title("Top-corner surface T")
+    ax.set_xlabel("t (hr)"); ax.set_ylabel("T (°F)"); ax.set_title("(e) Top-corner surface T(t)")
     ax.legend(fontsize=8)
 
+    # Row 2 — (f) Ambient T phase check
     ax = axes[1, 2]
     if eng_amb_F is not None:
         ax.plot(t_hrs, eng_amb_F, label="Engine ambient", color="tab:blue")
     if val.T_ambient_F is not None:
         ax.plot(val.time_hrs, val.T_ambient_F, "--", label="CW ambient", color="tab:orange")
-    ax.set_xlabel("t (hr)"); ax.set_ylabel("T (°F)"); ax.set_title("Ambient T (phase check)")
+    ax.set_xlabel("t (hr)"); ax.set_ylabel("T (°F)"); ax.set_title("(f) Ambient T (phase check)")
     ax.legend(fontsize=8)
+
+    # Row 3 — (g) Solar flux on top (PR 2)
+    ax = axes[2, 0]
+    if result is not None and grid is not None and result.q_solar_history is not None:
+        q_cl = result.q_solar_history[:, grid.nx - 1]  # centerline column
+        ax.plot(t_hrs, q_cl, color="tab:red", label="Solar flux (centerline)")
+        ax.axhline(0.0, color="gray", alpha=0.3, linestyle=":")
+        ax.set_xlabel("t (hr)"); ax.set_ylabel("q_sw (W/m²)")
+        ax.legend(fontsize=8)
+    ax.set_title("(g) Solar flux on top (W/m², negative=heat in)")
+
+    # Row 3 — (h) Placeholder for PR 3: Longwave flux
+    ax = axes[2, 1]
+    ax.set_title("(h) PR 3: Longwave flux (pending)")
+    ax.set_axis_off()
+
+    # Row 3 — (i) Placeholder for PR 4: Total top flux
+    ax = axes[2, 2]
+    ax.set_title("(i) PR 4: Total top flux (pending)")
+    ax.set_axis_off()
 
     plt.tight_layout()
     out = "cw_comparison_MIX-01.png"
