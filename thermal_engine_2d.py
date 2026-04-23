@@ -155,6 +155,23 @@ SOLAR_ABSORPTIVITY_DEFAULT = 0.65
 EMISSIVITY_DEFAULT = 0.88
 STEFAN_BOLTZMANN = 5.670374419e-8   # W/(m²·K⁴)
 
+# View factor from a vertical form face to the sky hemisphere.
+# For a vertical flat surface in contact with horizontal ground, half
+# the hemispheric solid angle sees sky and half sees ground.
+# Used in PR 6 side-face LW balance:
+#   q_lw_form = ε·σ·[F_SKY_VERT·(T_form⁴ − T_sky⁴)
+#                  + (1−F_SKY_VERT)·(T_form⁴ − T_ground⁴)]
+# Ref: Modest "Radiative Heat Transfer" 3rd ed., view-factor algebra
+# for perpendicular planes in infinite geometry.
+F_SKY_VERT: float = 0.5
+
+# Emissivity of bare soil / aggregate ground surface.
+# ASHRAE Fundamentals 2021 Ch. 14 Table 1: "Dry Ground" ε ≈ 0.92-0.96,
+# typical near-blackbody value for natural terrain.
+# Hardcoded (not parameterized) in Sprint 2; parameterizes in Sprint 3
+# when Barber soil model lands and surface type becomes an input.
+EMIS_GROUND: float = 0.95
+
 # Default material properties for non-concrete zones
 SOIL_PROPERTIES_2D: dict = {'k': 1.50, 'rho': 2100.0, 'Cp': 900.0}
 BLANKET_PROPERTIES_2D: dict = {'rho': 100.0, 'Cp': 1500.0}
@@ -627,6 +644,11 @@ class HydrationResult:
     q_side_LW_history: np.ndarray | None = None         # (n_out, n_side_rows) W/m², LW on form face
     q_side_conv_history: np.ndarray | None = None       # (n_out, n_side_rows) W/m², convection on form face
     q_side_total_history: np.ndarray | None = None      # (n_out, n_side_rows) W/m², total side flux
+    # PR 5 (M6a) Sprint 2 plumbing — populated by PR 6's vertical-form
+    # T_outer solve. Declared here but never written in PR 5 (remains None
+    # in all code paths). Shape (n_out, n_side_rows) matching the sibling
+    # q_side_*_history fields. n_side_rows = iy_concrete_end - 1.
+    T_outer_form_C_history: np.ndarray | None = None    # (n_out, n_side_rows) °C
 
 
 @dataclass
