@@ -252,3 +252,159 @@ Sprint 0 shipped. 48 tests pass, 3 xfail. MIX-01 Austin comparison:
 - Menzel vapor pressure unit (mmHg → kPa before applying 0.315)
 - Re-run 15-mix validation after fix; expect blanket_r_effective and
   Hu_factor calibrations to need adjustment
+
+---
+
+## Sprint 1 retrospective (2026-04-23)
+
+Sprint 1 (M5: solar + longwave radiation) shipped across 4 PRs landed on main.
+72 tests pass, 0 xfail, 0 xpass. MIX-01 Austin validation:
+
+| Metric         | Sprint 0   | Sprint 1   | S0 gate | S1 aspire | Result            |
+|----------------|------------|------------|---------|-----------|-------------------|
+| Peak Max T     | −1.0°F     | −0.3°F     | ±1.0°F  | ±0.5°F    | PASS S0 + aspire  |
+| Peak Gradient  | −1.0°F     | −0.9°F     | ±2.0°F  | ±1.0°F    | PASS S0 + aspire  |
+| Field RMS      | 1.45°F     | 1.36°F     | ≤2.0°F  | ≤1.0°F    | PASS S0           |
+| Centerline RMS | 0.86°F     | 0.88°F     | ≤1.0°F  | ≤0.5°F    | PASS S0           |
+| Corner RMS     | 4.00°F     | 4.10°F     | ≤3.0°F  | ≤3.0°F    | FAIL, deferred S2 |
+
+4 of 5 S0 metrics PASS. 2 of 5 meet S1-aspire. Corner RMS deferred to Sprint 2.
+
+### What shipped
+
+**PR 1 — Loader prep (commit e6cfa6e):** Added T_dp_C and T_sky_C hourly
+arrays to CWEnvironment, computed at load time from existing weather columns
+via Magnus-Tetens (dew point) and Berdahl-Martin (sky temperature with cloud
+cover correction). No engine changes. +4 tests.
+
+**PR 2 — Hourly ambient + solar on top BC (commit c469199):** ambient_temp_F
+rewritten to linearly interpolate env.T_air_F when populated. Solar term added
+to top BC with blanket attenuation factor f = h_top_combined / h_forced
+(≈4.7% for standard cure blanket). h_convective split into
+h_forced_convection (new physics) and _h_convective_legacy (preserved for
+regression/ablation modes). The blanket-attenuation derivation was inlined as
+a 30-line physics comment at the solar BC site — this is the load-bearing
+documentation that enabled PR 3/4 to inherit the same attenuation logic
+without re-deriving. +6 tests.
+
+**PR 3 — Longwave on top BC (commit 2562c9d):** LW exchange via quasi-steady
+T_outer solve on the blanket outer surface. Linearization initialization
+followed by 2 Newton iterations on the full T⁴ balance (pure linearization
+had >0.5°C error in extreme conditions). q_LW_history (effective, attenuated
+by f) and q_LW_incident_history (raw at blanket surface) exposed as
+diagnostics. +5 tests.
+
+**PR 4 — Side-face radiation + capstone (commit a8cb49c):** Corner
+quarter-cell top-face balance extended to include PR 2/3 radiation (was
+missing, causing −4°F DC offset at corner). Side-face solar infrastructure
+built but verified inactive via F_vert sweep (see below). R_FORM_EFFECTIVE_SI
+restored as empirical fallback. HydrationResult extended with full top-face
+and side-face flux decomposition. compare_to_cw.py gained S1 aspirational
+column and panel (i) total-flux visualization. +7 tests.
+
+### Architecture decisions finalized in Sprint 1
+
+- Blanket attenuation f = h_top_combined / h_forced_convection derived from
+  quasi-steady energy balance on blanket outer surface (pure R, zero thermal
+  mass). Same factor applies to both solar (PR 2) and LW (PR 3) because both
+  travel the same path from blanket outer surface through R_blanket to
+  concrete.
+- T_outer solved explicitly per column via Newton iteration (2 steps from
+  linearized initial guess). Error verified <0.01°C vs 5-step converged
+  reference.
+- Side-face radiation applies directly to concrete surface (no blanket, no
+  T_outer solve). Steel form modeled as thermally transparent per ACI 207.2
+  (negligible thermal mass, radiative properties assigned to concrete node).
+  This is the Sprint 1 model; Sprint 2 will revisit (see below).
+- Sky temperature and dewpoint computed at load time, not parsed from weather
+  file columns. Keeps sky model explicit and replaceable.
+- Diagnostic flux histories gated by diagnostic_outputs=True (default). For
+  MIX-01 memory overhead is negligible; flag exists for Sprint 3+ long-run
+  pavement scenarios.
+
+### F_vert empirical sweep (PR 4)
+
+The Sprint 0 retrospective hypothesis — that CW applies direct solar on the
+vertical form face creating the corner's large diurnal amplitude — was
+falsified empirically. F_vert sweep (MIX-01, 168 hr, R_FORM_EFFECTIVE_SI in
+place):
+
+| F_vert | Corner RMS | Peak Grad Δ | Peak Max T Δ |
+|--------|------------|-------------|--------------|
+| 0.0    | 4.10°F     | −0.9°F      | −0.3°F       |
+| 0.3    | 9.23°F     | −5.7°F      | −0.3°F       |
+| 0.5    | 14.58°F    | −4.8°F      | +0.0°F       |
+| 0.7    | 20.13°F    | +4.4°F      | +7.8°F       |
+| 1.0    | 28.58°F    | +17.9°F     | +22.3°F      |
+
+Corner RMS monotonically worsens with F_vert. Conclusion: corner diurnal
+mismatch is NOT a missing-solar problem. Our engine's corner runs too warm
+on average and with insufficient amplitude; adding daytime form-face solar
+worsens both. The missing physics is nighttime LW cooling via T_outer on
+the vertical form face (analogous to blanket T_outer but without the R
+resistance path). Infrastructure in place but production default is
+vertical_solar_factor = 0.0 until Sprint 2's vertical-form T_outer lands.
+
+### Bugs / corrections found in Sprint 1
+
+None in the engine itself. Two minor corrections to specs during
+implementation:
+
+- PR 3 linearization error exceeded 0.5°C threshold at T_conc=55°C,
+  T_sky=−10°C, G=900 W/m² (worst case in the specified sweep). Escalated
+  from Option A (linearization only) to Option B (linearize + 2 Newton
+  iterations). Physically correct; same conclusion reached independently in
+  review.
+- PR 2 solar absorption test threshold relaxed from 1.0°F to 0.5°F after LW
+  was added in PR 3. LW coupling reduces net solar gain (solar heats blanket
+  outer surface which then emits more LW). The 0.5°F threshold still firmly
+  validates solar has measurable positive effect.
+
+### Sprint 2 inherited scope
+
+The Corner RMS failure identifies the Sprint 2 deliverable precisely:
+
+1. **T_outer solve on vertical form face.** Steel form has zero thermal
+   mass; its surface temperature is set by ambient conditions (convection,
+   solar absorption, LW emission to sky) with minimal coupling to concrete
+   through its near-zero R. This is structurally identical to the blanket
+   T_outer solve from PR 3, but without the R_blanket attenuation term —
+   the form IS the "blanket outer surface" for this path.
+
+2. **Side-face LW via form's T_outer.** Once vertical-form T_outer is
+   solved, LW exchange between the form and sky uses the form's own T⁴,
+   not the concrete surface T⁴. This is the missing nighttime cooling
+   mechanism that explains CW's larger corner diurnal amplitude.
+
+3. **Re-enable F_vert with proper LW coupling.** The F_vert=0.5 default
+   will be restored in Sprint 2 once LW is present to balance it. Expected
+   to reach Corner RMS ≤3.0°F (S0 PASS).
+
+4. **ACI 207.2R Eq 27 orientation-dependent convection.** Horizontal vs.
+   vertical surfaces have different h_conv. Currently the engine applies
+   uniform h_forced_convection to both. This is secondary to T_outer
+   (smaller effect) but the Sprint 2 sprint scope naturally includes it
+   since all the affected code paths are touched together.
+
+5. **R_FORM_EFFECTIVE_SI decision.** Currently restored as empirical
+   fallback. Once Sprint 2's T_outer-on-form lands, this constant should
+   become unnecessary. If it isn't, document why and flag as calibration
+   debt for Sprint 4.
+
+### Known limitations going into Sprint 2
+
+- Corner RMS 4.10°F (gate 3.0°F) — pending Sprint 2 as above
+- Single-mix validation only; MIX-08 and MIX-15 fixtures not yet exported
+  from CW (passdown original plan; deferred to Sprint 3)
+- 15-mix library still validated only on Sprint 0 criteria (±5°F peak);
+  v3 S0 validation gate of ±1°F is only confirmed on MIX-01
+
+### Test count history
+
+| Sprint milestone | Tests | xfail | xpass |
+|------------------|-------|-------|-------|
+| Sprint 0 close   | 48    | 3     | 0     |
+| PR 1 close       | 52    | 3     | 0     |
+| PR 2 close       | 58    | 1     | 2     |
+| PR 3 close       | 63    | 1     | 3     |
+| Sprint 1 close   | 72    | 0     | 0     |
