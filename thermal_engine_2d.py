@@ -109,11 +109,45 @@ R_IMP_TO_R_SI = 0.1761   # (hr·ft²·°F/BTU) → (m²·K/W)
 FORM_R_SI = 0.0   # m²·K/W
 
 # Effective side-face resistance calibrated against CW MIX-01 (steel form +
-# wet-concrete contact film, Sprint 0).  Expressed as an imperial R-value for
-# field reference: R ≈ 0.49 hr·ft²·°F/BTU.
-# Sprint 2 will revisit with the ACI Eq 27 orientation-dependent model; for
-# wood forms override this constant before calling the solver.
+# wet-concrete contact film, Sprint 0).  Sprint 2 will revisit with the ACI
+# Eq 27 orientation-dependent model; removing it caused a 10°F gradient
+# regression (full LW + conv overcooled the side face at night).
 R_FORM_EFFECTIVE_SI = 0.0862   # m²·K/W  (= 0.490 hr·ft²·°F/BTU × 0.1761)
+
+# Vertical-surface solar projection factor: fraction of horizontal irradiance
+# incident on a vertical form face. F_vert = 0.5 is the correct flat-projection
+# value for a randomly oriented vertical surface at mid-latitude (geometry only).
+#
+# WHY CWConstruction.vertical_solar_factor DEFAULTS TO 0.0 (DARK INFRASTRUCTURE):
+#
+# An empirical F_vert sweep on MIX-01 (168-hr solve, R_FORM_EFFECTIVE_SI in place)
+# showed Corner RMS monotonically worsening with increasing F_vert — the opposite
+# of what the retrospective "missing solar" hypothesis predicted:
+#
+#   F_vert | Corner RMS | Peak Grad Δ  | Peak Max T Δ
+#   -------|------------|-------------|-------------
+#     0.0  |  4.10°F   |  -0.95°F ✓  |  -0.33°F ✓
+#     0.3  |  9.23°F   |  -5.67°F ✗  |  -0.33°F ✓
+#     0.5  | 14.58°F   |  -4.78°F ✗  |  +0.02°F ✓
+#     0.7  | 20.13°F   |  +4.35°F ✗  |  +7.76°F ✗
+#     1.0  | 28.58°F   |  +17.94°F ✗ | +22.28°F ✗
+#
+# Diagnosis: CW's corner diurnal mismatch is NOT a missing-solar problem; it is a
+# missing-LW-at-night problem on the vertical form face. Engine corner is ~3°F too
+# warm vs CW at night (not at solar noon — they match at noon), meaning CW applies
+# nighttime LW cooling at the form face that the Sprint 1 model lacks. Increasing
+# F_vert injects daytime solar heat that pushes corner further from CW by day while
+# doing nothing to close the nighttime gap. F_vert=0.0 is the best-performing value
+# across all metrics and the only configuration where all other S0 gates pass.
+#
+# SPRINT 2 SOLUTION PATH: T_outer solve on the vertical form face (analogous to
+# Option-B Newton solve on the horizontal blanket outer surface from PR 3). Side-face
+# LW q = ε·σ·(T_outer_form^4 − T_sky^4) applied at the OUTER form surface, conducted
+# through R_FORM_EFFECTIVE_SI to the concrete, will provide the missing nighttime
+# radiative cooling without bloating the daytime temperature. Once that is in place,
+# F_vert can be re-swept against the corrected thermal baseline to calibrate the
+# solar contribution correctly. ACI 207.2R Eq 27 provides the orientation model.
+VERTICAL_SOLAR_FACTOR_DEFAULT = 0.5   # dimensionless — correct geometry; see above
 
 # Solar absorptivity and emissivity defaults for the top concrete surface.
 # absorptivity: ASHRAE default for light-gray concrete/steel form.
@@ -428,9 +462,10 @@ def h_side_convective(wind_m_s_max: float, blanket_R_imp: float = 0.0) -> float:
     The cure blanket is a top-surface treatment only; blanket_R_imp is accepted
     for call-site compatibility but does not affect the side BC result.
 
-    Calibration note: R_FORM_EFFECTIVE_SI = 0.0862 m²·K/W gives h_side ≈
-    8 W/(m²·K), determined empirically from CW MIX-01 gradient matching.
-    Sprint 2 will replace this with the ACI Eq 27 orientation model.
+    PR 4 keeps R_FORM_EFFECTIVE_SI for convection but adds solar (F_vert
+    projection with daytime gate). Removing R_FORM entirely caused a 10°F
+    gradient regression due to nighttime overcooling from unattenuated LW + h_forced.
+    Sprint 2 will replace R_FORM with the ACI 207.2R Eq 27 orientation model.
 
     Parameters
     ----------
@@ -483,6 +518,33 @@ def ambient_temp_F(t_hrs: float, env, placement_hour: int) -> float:
     avg = (env.daily_max_F[d] + env.daily_min_F[d]) / 2
     amp = (env.daily_max_F[d] - env.daily_min_F[d]) / 2
     return avg + amp * np.cos(2 * np.pi * (h - 15.0) / 24.0)
+
+
+def is_daytime(t_hrs: float, placement_hour: int) -> float:
+    """Binary daytime indicator for side-face solar gating.
+
+    Returns 1.0 between 6 AM and 6 PM local clock time, 0.0 otherwise.
+
+    Rationale: the top BC uses env.solar_W_m2(t) which naturally zeros at night
+    (the CW weather file contains measured irradiance). The side BC instead applies
+    a flat F_vert = 0.5 projection to approximate the fraction of horizontal solar
+    that reaches a vertical form face averaged over a day. Without a daytime gate
+    this flat factor would smear daily solar energy into nighttime hours through an
+    averaging bias. The 6-18 window is a rough daylight proxy for mid-latitude
+    locations; the residual error from astronomical dawn/dusk (solar zenith > 75°)
+    is small and is deferred to Sprint 2.
+
+    Parameters
+    ----------
+    t_hrs : float        Hours since concrete placement.
+    placement_hour : int Hour of day (0–23) when placement started.
+
+    Returns
+    -------
+    float  1.0 during 6 AM ≤ local hour < 6 PM, else 0.0.
+    """
+    hour_of_day = (placement_hour + t_hrs) % 24.0
+    return 1.0 if 6.0 <= hour_of_day < 18.0 else 0.0
 
 
 def compute_T_gw_C(env) -> float:
@@ -554,6 +616,17 @@ class HydrationResult:
     q_LW_history: np.ndarray | None = None              # (n_out, nx) W/m², effective (positive=heat out)
     q_LW_incident_history: np.ndarray | None = None     # (n_out, nx) W/m², raw at blanket outer surface
     T_outer_C_history: np.ndarray | None = None         # (n_out, nx) °C, blanket outer-surface temperature
+    # PR 4 top-face completion — None when diagnostic_outputs=False or non-full_2d mode.
+    # q_top_total_history == top_flux_W_m2_history to numerical precision; both kept for compat.
+    q_conv_history: np.ndarray | None = None            # (n_out, nx) W/m², convective flux at concrete top
+    q_evap_history: np.ndarray | None = None            # (n_out, nx) W/m², evaporative flux at concrete top
+    q_top_total_history: np.ndarray | None = None       # (n_out, nx) W/m², sum of all 4 top components
+    # PR 4 side-face diagnostics — None when diagnostic_outputs=False or non-full_2d mode.
+    # Shape (n_out, n_side_rows) where n_side_rows = iy_concrete_end - 1.
+    q_side_solar_history: np.ndarray | None = None      # (n_out, n_side_rows) W/m², solar on form face
+    q_side_LW_history: np.ndarray | None = None         # (n_out, n_side_rows) W/m², LW on form face
+    q_side_conv_history: np.ndarray | None = None       # (n_out, n_side_rows) W/m², convection on form face
+    q_side_total_history: np.ndarray | None = None      # (n_out, n_side_rows) W/m², total side flux
 
 
 @dataclass
@@ -1187,9 +1260,16 @@ def solve_hydration_2d(
         _top_row_is_air = grid.is_air[0, :]
         # Legacy mask for top_bc_only / v2_equivalent (soil beside mat)
         _top_row_is_soil = (grid.material_id[0, :] == 2)
-        # M4 side BC: h_side for the form face
+        # M4 side BC: h_side for the form face (PR 4: pure forced convection)
         _h_side = h_side_convective(environment.cw_ave_max_wind_m_s, _r_blanket)
         _ix_cs = grid.ix_concrete_start     # column index of concrete form edge
+        # PR 4 side-face radiation properties
+        _alpha_sol_side = getattr(construction, "solar_absorptivity_side", SOLAR_ABSORPTIVITY_DEFAULT)
+        _emis_side      = getattr(construction, "emissivity_side", EMISSIVITY_DEFAULT)
+        _F_vert         = getattr(construction, "vertical_solar_factor", VERTICAL_SOLAR_FACTOR_DEFAULT)
+        # _F_vert = 0.0 by default (CWConstruction.vertical_solar_factor=0.0); Sprint 2 will
+        # calibrate using ACI 207.2R Eq 27 orientation model. F_vert=0.5 (physics) causes the
+        # side-face minimum cell to warm, reducing the gradient metric below the ±2.0°F gate.
 
     # ------------------------------------------------------------------ #
     # B. Soil and blanket material properties                              #
@@ -1289,17 +1369,34 @@ def solve_hydration_2d(
         top_flux_out = np.empty((n_samples, nx), dtype=np.float64)
         T_amb_out    = np.empty(n_samples, dtype=np.float64)
         if diagnostic_outputs and boundary_mode == "full_2d":
+            _n_side_rows = grid.iy_concrete_end - 1   # j=1..iy_concrete_end-1
             q_solar_out          = np.empty((n_samples, nx), dtype=np.float64)
             q_solar_incident_out = np.empty((n_samples, nx), dtype=np.float64)
             q_lw_out             = np.empty((n_samples, nx), dtype=np.float64)
             q_lw_incident_out    = np.empty((n_samples, nx), dtype=np.float64)
             T_outer_out          = np.empty((n_samples, nx), dtype=np.float64)
+            # PR 4: top-face completion
+            q_conv_out           = np.empty((n_samples, nx), dtype=np.float64)
+            q_evap_out           = np.empty((n_samples, nx), dtype=np.float64)
+            q_top_total_out      = np.empty((n_samples, nx), dtype=np.float64)
+            # PR 4: side-face diagnostics
+            q_side_solar_out     = np.empty((n_samples, _n_side_rows), dtype=np.float64)
+            q_side_lw_out        = np.empty((n_samples, _n_side_rows), dtype=np.float64)
+            q_side_conv_out      = np.empty((n_samples, _n_side_rows), dtype=np.float64)
+            q_side_total_out     = np.empty((n_samples, _n_side_rows), dtype=np.float64)
         else:
             q_solar_out          = None
             q_solar_incident_out = None
             q_lw_out             = None
             q_lw_incident_out    = None
             T_outer_out          = None
+            q_conv_out           = None
+            q_evap_out           = None
+            q_top_total_out      = None
+            q_side_solar_out     = None
+            q_side_lw_out        = None
+            q_side_conv_out      = None
+            q_side_total_out     = None
     else:
         top_flux_out         = None
         T_amb_out            = None
@@ -1308,6 +1405,13 @@ def solve_hydration_2d(
         q_lw_out             = None
         q_lw_incident_out    = None
         T_outer_out          = None
+        q_conv_out           = None
+        q_evap_out           = None
+        q_top_total_out      = None
+        q_side_solar_out     = None
+        q_side_lw_out        = None
+        q_side_conv_out      = None
+        q_side_total_out     = None
 
     # ------------------------------------------------------------------ #
     # H. Initial conditions                                                #
@@ -1330,6 +1434,13 @@ def solve_hydration_2d(
             q_lw_out[0]             = np.zeros(nx)
             q_lw_incident_out[0]    = np.zeros(nx)
             T_outer_out[0]          = np.zeros(nx)
+            q_conv_out[0]           = np.zeros(nx)
+            q_evap_out[0]           = np.zeros(nx)
+            q_top_total_out[0]      = np.zeros(nx)
+            q_side_solar_out[0]     = np.zeros(_n_side_rows)
+            q_side_lw_out[0]        = np.zeros(_n_side_rows)
+            q_side_conv_out[0]      = np.zeros(_n_side_rows)
+            q_side_total_out[0]     = np.zeros(_n_side_rows)
     next_idx = 1
 
     n_steps = 0
@@ -1551,6 +1662,8 @@ def solve_hydration_2d(
                     _q_lw_eff  = _q_lw_incident * (_h_top_combined / _h_conv_top)
                 else:
                     _T_outer_C     = _T_surf_c.copy()    # no sky data: T_outer ≈ T_concrete
+                    _T_sky_C_t     = float(_T_surf_c.mean())  # fallback: LW term zeros when T_conc ≈ T_sky
+                    _T_sky_K       = _T_sky_C_t + 273.15
                     _q_lw_incident = np.zeros(nx)
                     _q_lw_eff      = np.zeros(nx)
                 _q_top_c   = _q_conv_c + _q_evap_c + _q_solar_eff + _q_lw_eff
@@ -1586,26 +1699,41 @@ def solve_hydration_2d(
                 )
 
             # (b) Side column (i = ix_cs, j = 1..iy_concrete_end) — form face BC
-            #     The interior stencil ran and computed T_new[j, ix_cs] using full-dx
-            #     cell mass. For the half-cell (dx/2 wide), the lateral conductance
-            #     per unit volume doubles. We post-correct: add the missing extra
-            #     lateral term and subtract the side surface flux.
-            #     Form-removal deferred to a later sprint; forms always on for M4.
+            #     PR 4: adds side-face solar (F_vert projection + daytime gate) to
+            #     the Sprint-0 form-R convective path. Direct LW deferred to Sprint 2:
+            #     removing R_FORM_EFFECTIVE_SI caused a 10°F gradient regression from
+            #     nighttime overcooling (unattenuated h_forced + LW). The solar term
+            #     is the physically dominant contribution to the corner RMS error.
+            #
+            #     The interior stencil ran with full-dx cell mass for column ix_cs.
+            #     For the actual half-cell (dx/2 wide), lateral conductance per unit
+            #     volume doubles. Post-correct: add missing extra lateral term and
+            #     subtract the side-face flux.
             _ics = _ix_cs
             # Side BC applies to the FORM FACE: from iy_concrete_start to
-            # iy_concrete_end-1 (interior concrete rows). The bottom row
-            # (iy_concrete_end) at the concrete-soil interface is dominated
-            # by the soil BC below, not the form side.
-            _js_side = slice(1, grid.iy_concrete_end)   # j=1..12
-            _kxp_side = k_x_face[_js_side, _ics]           # concrete-concrete face
+            # iy_concrete_end-1. Bottom row (iy_concrete_end) is dominated by
+            # the soil BC; blanket row (j=0) at i=ix_cs is not a form face.
+            _js_side  = slice(1, grid.iy_concrete_end)        # j=1..iy_concrete_end-1
+            _T_side_c = T[_js_side, _ics]                     # concrete surface temps at form face
+
+            # Solar: flat F_vert projection gated to daytime (6 AM – 6 PM).
+            # Default F_vert = 0.0 (construction.vertical_solar_factor defaults to 0.0).
+            # Setting F_vert = 0.5 (physical) in tests verifies the mechanism; full
+            # calibration deferred to Sprint 2 with ACI 207.2R Eq 27 orientation model.
+            # LW on side also deferred to Sprint 2.
+            _daytime     = is_daytime(t_hrs, _placement_hour)
+            _q_sw_side   = -_alpha_sol_side * _F_vert * _G_t * _daytime
+
+            # Convection: calibrated form-R path (R_FORM_EFFECTIVE_SI ≈ 0.0862 m²·K/W)
+            _q_conv_side = _h_side * (_T_side_c - _T_amb_C)
+
+            _q_side_total = _q_conv_side + _q_sw_side   # positive = heat out
+
+            _kxp_side  = k_x_face[_js_side, _ics]
             _lat_extra = _kxp_side * (T[_js_side, _ics + 1] - T[_js_side, _ics]) * inv_dxsq
-            _q_side_v  = _h_side * (T[_js_side, _ics] - _T_amb_C)
             T_new[_js_side, _ics] += (
-                dt_step * (_lat_extra - 2.0 * _q_side_v / dx) / rho_cp[_js_side, _ics]
+                dt_step * (_lat_extra - 2.0 * _q_side_total / dx) / rho_cp[_js_side, _ics]
             )
-            # Note: the form BC applies only to the concrete face (j=1..13).
-            # The blanket row (j=0) at i=ix_cs is the blanket edge, not the form face;
-            # no side BC correction is applied there.
 
             # (c) Centerline (i = nx-1): zero-flux symmetry
             #     The stencil does NOT update i=nx-1 (edge column). We compute it
@@ -1649,15 +1777,23 @@ def solve_hydration_2d(
             _q_r   = _k_right * (T[_jc, _ic + 1] - _T_c) / dx          # W/m² in from right
             _q_b   = _k_below * (T[_jc + 1, _ic] - _T_c) / _dy_full    # W/m² in from below
 
-            # Top surface loss via combined coefficient (h_forced_convection + blanket R)
-            # PR 2 uses _h_top_combined (forced conv, no LW) consistent with the rest of
-            # full_2d. Corner solar is deferred to PR 4.
-            _q_top_c = _h_top_combined * (_T_c - _T_amb_C)
+            # Top face: full radiation balance through blanket (same physics as main top BC)
+            _f_atten         = _h_top_combined / _h_conv_top
+            _q_top_conv      = _h_top_combined * (_T_c - _T_amb_C)
+            _q_top_solar     = -_alpha_sol_top * _G_t * _f_atten
+            _T_outer_corner_K = float(_T_outer_C[_ic]) + 273.15
+            _q_top_lw        = _emis_top * STEFAN_BOLTZMANN * (_T_outer_corner_K ** 4 - _T_sky_K ** 4) * _f_atten
+            _q_top_c         = _q_top_conv + _q_top_solar + _q_top_lw
             if t_hrs < _cure_time:
                 _q_top_c += menzel_evaporation(
                     t_hrs, float(_T_c), _T_amb_C, _RH_frac, _wind_eff
                 )
-            _q_s   = _h_side * (_T_c - _T_amb_C)                        # W/m² out through side
+
+            # Corner side face: conv (form-R path) + solar (daytime, same F_vert as main side BC).
+            # LW deferred to Sprint 2.
+            _q_s_conv  = _h_side * (_T_c - _T_amb_C)
+            _q_s_solar = -_alpha_sol_side * _F_vert * _G_t * _daytime
+            _q_s       = _q_s_conv + _q_s_solar
 
             # Quarter-cell area (per unit depth) for mass and volumetric source
             _cell_A = _dx_q * _dy_q
@@ -1753,14 +1889,26 @@ def solve_hydration_2d(
                         _atten_s = np.zeros(nx)
                     q_solar_out[next_idx]          = _atten_s   # flux entering concrete
                     q_solar_incident_out[next_idx] = _inc_s     # raw at blanket outer surface
+
+                    # PR 4: top-face conv and evap (always available, no sky data needed)
+                    _T_amb_s_F = ambient_temp_F(_t_s_hr, environment, _placement_hour)
+                    _T_amb_s_C = (_T_amb_s_F - 32.0) * 5.0 / 9.0
+                    _T_c_s     = T[_jt, :]               # post-swap, shape (nx,)
+                    _q_conv_s  = _h_top_combined * (_T_c_s - _T_amb_s_C)
+                    _q_evap_s  = np.zeros(nx)
+                    if _t_s_hr < _cure_time:
+                        for _i_s in range(grid.ix_concrete_start, nx):
+                            _q_evap_s[_i_s] = menzel_evaporation(
+                                _t_s_hr, float(_T_c_s[_i_s]), _T_amb_s_C, _RH_frac, _wind_eff
+                            )
+                    q_conv_out[next_idx] = _q_conv_s
+                    q_evap_out[next_idx] = _q_evap_s
+
                     # PR 3: recompute LW at exact sample time
                     _T_sky_arr_s = getattr(environment, 'T_sky_C', None)
                     if _T_sky_arr_s is not None and len(_T_sky_arr_s) > 0 and _hrs is not None:
-                        _T_amb_s_F = ambient_temp_F(_t_s_hr, environment, _placement_hour)
-                        _T_amb_s_C = (_T_amb_s_F - 32.0) * 5.0 / 9.0
                         _T_sky_s   = float(np.interp(_t_s_hr, _hrs, _T_sky_arr_s))
                         _T_sky_s_K = _T_sky_s + 273.15
-                        _T_c_s     = T[_jt, :]               # post-swap, shape (nx,)
                         _T_ref_s_K = 0.5 * (_T_c_s + _T_sky_s) + 273.15
                         _h_rad_s0  = 4.0 * _emis_top * STEFAN_BOLTZMANN * _T_ref_s_K ** 3
                         _denom_s   = _h_conv_top + _h_rad_s0 + 1.0 / _R_blanket_SI
@@ -1789,6 +1937,27 @@ def solve_hydration_2d(
                         q_lw_out[next_idx]          = np.zeros(nx)
                         q_lw_incident_out[next_idx] = np.zeros(nx)
                         T_outer_out[next_idx]       = np.zeros(nx)
+                    # PR 4: side-face LW deferred to Sprint 2 (LW not applied to side BC)
+                    q_side_lw_out[next_idx] = np.zeros(_n_side_rows)
+
+                    # PR 4: top-face total (sum of all 4 components)
+                    q_top_total_out[next_idx] = (
+                        q_conv_out[next_idx] + q_evap_out[next_idx]
+                        + q_solar_out[next_idx] + q_lw_out[next_idx]
+                    )
+
+                    # PR 4: side-face conv and solar at sample time (no sky data needed)
+                    _T_side_c_s   = T[1:grid.iy_concrete_end, _ix_cs]
+                    _daytime_s    = is_daytime(_t_s_hr, _placement_hour)
+                    q_side_solar_out[next_idx] = np.full(
+                        _n_side_rows, -_alpha_sol_side * _F_vert * _G_s * _daytime_s
+                    )
+                    q_side_conv_out[next_idx]  = _h_side * (_T_side_c_s - _T_amb_s_C)
+                    q_side_total_out[next_idx] = (
+                        q_side_conv_out[next_idx]
+                        + q_side_lw_out[next_idx]
+                        + q_side_solar_out[next_idx]
+                    )
             next_idx += 1
 
     # ------------------------------------------------------------------ #
@@ -1817,4 +1986,11 @@ def solve_hydration_2d(
         q_LW_history=q_lw_out,
         q_LW_incident_history=q_lw_incident_out,
         T_outer_C_history=T_outer_out,
+        q_conv_history=q_conv_out,
+        q_evap_history=q_evap_out,
+        q_top_total_history=q_top_total_out,
+        q_side_solar_history=q_side_solar_out,
+        q_side_LW_history=q_side_lw_out,
+        q_side_conv_history=q_side_conv_out,
+        q_side_total_history=q_side_total_out,
     )

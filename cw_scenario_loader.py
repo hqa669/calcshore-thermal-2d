@@ -171,7 +171,12 @@ class CWConstruction:
 
     blanket_R_value: float = 5.67
     solar_absorptivity_top: float = 0.65   # ASHRAE default for light-gray concrete/steel
-    emissivity_top: float = 0.88            # unused in PR 2; added now to avoid amending twice
+    emissivity_top: float = 0.88           # blanket outer surface emissivity
+    solar_absorptivity_side: float = 0.65  # steel form (similar to light concrete)
+    emissivity_side: float = 0.88          # steel form emissivity
+    # F_vert = 0.0 disables side solar; Sprint 2 will calibrate using ACI 207.2R Eq 27
+    # (setting F_vert=0.5 in tests verifies the mechanism is in place)
+    vertical_solar_factor: float = 0.0    # F_vert: flat projection factor for vertical face
     form_removal_hrs: float = 168.0
     form_color: str = "Red"
     form_type: str = "Steel"

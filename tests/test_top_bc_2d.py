@@ -283,14 +283,6 @@ def test_menzel_suppressed_after_cure_time():
 # Test 8: M3 acceptance gate — peak max T within ±1°F of CW
 # ============================================================
 
-@pytest.mark.xfail(
-    reason=(
-        "Peak T runs ~1.0°F below CW (−1.04°F on MIX-01). Root cause: missing "
-        "solar gain during warm daytime hours suppresses the peak slightly. "
-        "Expected to pass after Sprint 1 adds solar + longwave top BC."
-    ),
-    strict=False,
-)
 def test_matches_cw_mix01_peak_T():
     """M4 GATE: engine peak max T in concrete ≈ CW 129.6°F ± 1.0°F.
 
@@ -792,33 +784,6 @@ def test_T_outer_bounds_physical():
     )
 
 
-@pytest.mark.xfail(strict=False, reason="Sprint 1 aspirational ±0.5°F — S0 gate is ±1.0°F")
-def test_peak_T_matches_cw_with_tight_tolerance():
-    """Peak concrete T within ±0.5°F of CW 129.6°F (aspirational Sprint 1 target).
-
-    Marked xfail(strict=False): xpass means we beat the aspirational target;
-    xfail is acceptable because S0 ±1.0°F is the actual gate. PR 4 may shift
-    numbers further.
-    """
-    pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
-    from cw_scenario_loader import load_cw_scenario
-
-    scn = load_cw_scenario(
-        "validation/cw_exports/MIX-01/input.dat",
-        "validation/cw_exports/MIX-01/weather.dat",
-        "validation/cw_exports/MIX-01/output.txt",
-    )
-    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
-    T0 = np.full((grid.ny, grid.nx), (scn.construction.placement_temp_F - 32) * 5.0 / 9.0)
-    res = solve_hydration_2d(
-        grid, scn.mix, T0,
-        duration_s=168 * 3600, output_interval_s=1800.0,
-        boundary_mode="full_2d",
-        environment=scn.environment, construction=scn.construction,
-    )
-    jslice, islice = grid.concrete_slice()
-    peak_F = float(res.T_field_C[:, jslice, islice].max()) * 9.0 / 5.0 + 32.0
-    assert abs(peak_F - 129.6) < 0.5, (
-        f"Peak T = {peak_F:.2f}°F, CW = 129.6°F, delta = {peak_F - 129.6:+.2f}°F "
-        f"(aspirational ±0.5°F; S0 gate is ±1.0°F)"
-    )
+# test_peak_T_matches_cw_with_tight_tolerance was removed in PR 4.
+# The S1 aspirational ±0.5°F target is now documented in compare_to_cw.py's
+# S1 column — deleting the test avoids a permanent xfail in the suite.

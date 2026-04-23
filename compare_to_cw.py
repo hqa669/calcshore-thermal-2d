@@ -29,6 +29,13 @@ TOL_FIELD_RMS_F   = 2.0   # °F
 TOL_CENTER_RMS_F  = 1.0   # °F
 TOL_CORNER_RMS_F  = 3.0   # °F
 
+# S1 aspirational tolerances — documentary only; never drive PASS/FAIL or exit code
+S1_TOL_PEAK_MAX_F    = 0.5
+S1_TOL_PEAK_GRAD_F   = 1.0
+S1_TOL_FIELD_RMS_F   = 1.0
+S1_TOL_CENTER_RMS_F  = 0.5
+S1_TOL_CORNER_RMS_F  = 3.0   # same as S0 — this is the Sprint 1 headline target
+
 # CW reference values for MIX-01 (docs/coding_passdown_v3.md)
 CW_PEAK_MAX_F    = 129.6
 CW_PEAK_MAX_T_HR = 145.8
@@ -94,6 +101,7 @@ def main():
         boundary_mode="full_2d",
         environment=scn.environment,
         construction=scn.construction,
+        diagnostic_outputs=True,
     )
     t_wall_s = time.perf_counter() - t_wall_start
 
@@ -195,6 +203,14 @@ def main():
     if pass_center is not None: overall = overall and pass_center
     if pass_corner is not None: overall = overall and pass_corner
 
+    # S1 aspirational (documentary only — never affects exit code)
+    s1_peak_max  = abs(peak_max_delta) < S1_TOL_PEAK_MAX_F
+    s1_peak_grad = abs(peak_grad_delta) < S1_TOL_PEAK_GRAD_F
+    s1_field     = (field_rms_F  < S1_TOL_FIELD_RMS_F)  if field_rms_F  is not None else False
+    s1_center    = (center_rms_F < S1_TOL_CENTER_RMS_F) if center_rms_F is not None else False
+    s1_corner    = (corner_rms_F < S1_TOL_CORNER_RMS_F) if corner_rms_F is not None else False
+    s1_count = sum([s1_peak_max, s1_peak_grad, s1_field, s1_center, s1_corner])
+
     # ------------------------------------------------------------------ #
     # 7. Print formatted table
     # ------------------------------------------------------------------ #
@@ -203,42 +219,33 @@ def main():
     n_nodes = grid.nx * grid.ny
     scenario_name = "MIX-01 Austin 2026-07-15"
 
+    def s1_mark(ok): return "✓" if ok else "✗"
+
     print()
     print(f"  {scenario_name}  ({168} hr run, {n_steps} timesteps, {n_nodes} nodes)")
     print(f"  Peak Max T:     Engine {engine_peak_max_F:6.1f}°F @ {engine_peak_max_hr:5.1f} hr | CW {cw_peak_max_F:6.1f}°F @ {cw_peak_max_hr:.1f} hr")
-    print(f"                  Δ = {peak_max_delta:+.1f}°F   [{pass_fail(pass_peak_max)}] (tol ±{TOL_PEAK_MAX_F:.1f}°F)")
+    print(f"                  Δ = {peak_max_delta:+.1f}°F   [{pass_fail(pass_peak_max)}] (S0 ±{TOL_PEAK_MAX_F:.1f}°F)  [S1-aspire ±{S1_TOL_PEAK_MAX_F:.1f}°F: {s1_mark(s1_peak_max)}]")
     print(f"  Peak Gradient:  Engine {engine_peak_grad_F:5.1f}°F @ {engine_peak_grad_hr:5.1f} hr | CW {cw_peak_grad_F:5.1f}°F @ {CW_PEAK_GRAD_T_HR:.1f} hr")
-    print(f"                  Δ = {peak_grad_delta:+.1f}°F   [{pass_fail(pass_peak_grad)}] (tol ±{TOL_PEAK_GRAD_F:.1f}°F)")
+    print(f"                  Δ = {peak_grad_delta:+.1f}°F   [{pass_fail(pass_peak_grad)}] (S0 ±{TOL_PEAK_GRAD_F:.1f}°F)  [S1-aspire ±{S1_TOL_PEAK_GRAD_F:.1f}°F: {s1_mark(s1_peak_grad)}]")
 
     if field_rms_F is not None:
-        print(f"  Field-wide RMS: {field_rms_F:.2f}°F   [{pass_fail(pass_field)}] (tol {TOL_FIELD_RMS_F:.1f}°F)")
+        print(f"  Field-wide RMS: {field_rms_F:.2f}°F        [{pass_fail(pass_field)}] (S0 tol {TOL_FIELD_RMS_F:.1f}°F)    [S1-aspire {S1_TOL_FIELD_RMS_F:.1f}°F: {s1_mark(s1_field)}]")
     else:
         print(f"  Field-wide RMS: N/A (CW T_field_F not in fixture)")
 
     if center_rms_F is not None:
-        print(f"  Centerline RMS: {center_rms_F:.2f}°F   [{pass_fail(pass_center)}] (tol {TOL_CENTER_RMS_F:.1f}°F)")
+        print(f"  Centerline RMS: {center_rms_F:.2f}°F        [{pass_fail(pass_center)}] (S0 tol {TOL_CENTER_RMS_F:.1f}°F)    [S1-aspire {S1_TOL_CENTER_RMS_F:.1f}°F: {s1_mark(s1_center)}]")
     else:
         print(f"  Centerline RMS: N/A (CW T_field_F not in fixture)")
 
     if corner_rms_F is not None:
-        print(f"  Corner RMS:     {corner_rms_F:.2f}°F   [{pass_fail(pass_corner)}] (tol {TOL_CORNER_RMS_F:.1f}°F)")
+        print(f"  Corner RMS:     {corner_rms_F:.2f}°F        [{pass_fail(pass_corner)}] (S0 tol {TOL_CORNER_RMS_F:.1f}°F)    [S1-aspire {S1_TOL_CORNER_RMS_F:.1f}°F: {s1_mark(s1_corner)}]")
     else:
         print(f"  Corner RMS:     N/A (CW T_field_F not in fixture)")
 
     print(f"  Runtime:        {t_wall_s:.1f} s")
-    # Determine overall status with Sprint-0 known-limitation annotation
-    if overall:
-        overall_str = "[PASS]"
-    elif (pass_peak_max and pass_peak_grad and pass_field
-          and (pass_center is None or pass_center)
-          and not (pass_corner is None or pass_corner)):
-        # Corner RMS is the only failure; root cause is missing solar forcing.
-        overall_str = "[PARTIAL — 4/5 metrics pass; Corner RMS deferred to Sprint 1 (solar forcing)]"
-    elif pass_peak_max and pass_peak_grad and pass_field:
-        overall_str = "[PARTIAL — Peak, Gradient, Field pass; Ctr/Corner deferred to Sprint 1]"
-    else:
-        overall_str = "[FAIL]"
-    print(f"  OVERALL:        {overall_str}")
+    overall_str = "[PASS]" if overall else "[FAIL]"
+    print(f"  OVERALL:        {overall_str}    S1-aspire: {s1_count}/5 metrics meet")
     print()
 
     # ------------------------------------------------------------------ #
@@ -340,10 +347,23 @@ def _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
         ax.legend(fontsize=8)
     ax.set_title("(h) Longwave flux (W/m², positive=heat out)")
 
-    # Row 3 — (i) Placeholder for PR 4: Total top flux
+    # Row 3 — (i) PR 4: Total top-surface flux with components
     ax = axes[2, 2]
-    ax.set_title("(i) PR 4: Total top flux (pending)")
-    ax.set_axis_off()
+    if (result is not None and grid is not None
+            and result.q_top_total_history is not None
+            and result.q_conv_history is not None):
+        cl = grid.nx - 1
+        ax.plot(t_hrs, result.q_conv_history[:, cl],      ls="--", color="tab:blue",   lw=0.8, label="Convection")
+        ax.plot(t_hrs, result.q_evap_history[:, cl],      ls="--", color="tab:green",  lw=0.8, label="Evaporation")
+        ax.plot(t_hrs, result.q_solar_history[:, cl],     ls="--", color="tab:orange", lw=0.8, label="Solar (effective)")
+        ax.plot(t_hrs, result.q_LW_history[:, cl],        ls="--", color="tab:purple", lw=0.8, label="LW (effective)")
+        ax.plot(t_hrs, result.q_top_total_history[:, cl], color="black", lw=1.5, label="Total")
+        ax.axhline(0.0, color="gray", alpha=0.3, linestyle=":")
+        ax.set_xlabel("t (hr)")
+        ax.set_ylabel("W/m² (positive = heat out)")
+        ax.legend(fontsize=7, loc="best")
+        ax.grid(alpha=0.3)
+    ax.set_title("(i) Total top-surface flux (W/m², positive=heat out)")
 
     plt.tight_layout()
     out = "cw_comparison_MIX-01.png"
