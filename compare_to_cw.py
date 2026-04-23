@@ -327,10 +327,18 @@ def _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
         ax.legend(fontsize=8)
     ax.set_title("(g) Solar flux on top (W/m², negative=heat in)")
 
-    # Row 3 — (h) Placeholder for PR 3: Longwave flux
+    # Row 3 — (h) PR 3: Longwave flux
     ax = axes[2, 1]
-    ax.set_title("(h) PR 3: Longwave flux (pending)")
-    ax.set_axis_off()
+    if result is not None and grid is not None and result.q_LW_history is not None:
+        q_eff = result.q_LW_history[:, grid.nx - 1]
+        q_inc = result.q_LW_incident_history[:, grid.nx - 1]
+        ax.plot(t_hrs, q_eff, color="tab:purple", label="q_LW effective (into concrete)")
+        ax.plot(t_hrs, q_inc, "--", color="tab:purple", alpha=0.5,
+                label="q_LW incident (at blanket surface)")
+        ax.axhline(0.0, color="gray", alpha=0.3, linestyle=":")
+        ax.set_xlabel("t (hr)"); ax.set_ylabel("q_lw (W/m²)")
+        ax.legend(fontsize=8)
+    ax.set_title("(h) Longwave flux (W/m², positive=heat out)")
 
     # Row 3 — (i) Placeholder for PR 4: Total top flux
     ax = axes[2, 2]

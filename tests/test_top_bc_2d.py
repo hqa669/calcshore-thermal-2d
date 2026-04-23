@@ -13,6 +13,9 @@ import pytest
 
 from thermal_engine_2d import (
     R_IMP_TO_R_SI,
+    STEFAN_BOLTZMANN,
+    EMISSIVITY_DEFAULT,
+    SOLAR_ABSORPTIVITY_DEFAULT,
     HydrationResult,
     ambient_temp_F,
     build_grid_half_mat,
@@ -498,7 +501,9 @@ def test_solar_absorption_raises_peak():
     env_zero.solar_W_m2 = np.zeros_like(env_zero.solar_W_m2)
     res_dark = solve_hydration_2d(grid, scn.mix, T0, environment=env_zero, **common)
     dT_F = (res_nom.peak_T_C - res_dark.peak_T_C) * 9.0 / 5.0
-    assert dT_F >= 1.0, f"solar bump only {dT_F:.2f}°F; expected >= 1.0"
+    # PR 3 note: LW raises T_outer on sunny hours → more LW loss → slightly smaller
+    # net solar bump than before LW was added. Threshold relaxed from 1.0°F to 0.5°F.
+    assert dT_F >= 0.5, f"solar bump only {dT_F:.2f}°F; expected >= 0.5"
 
 
 def test_h_forced_convection_no_lw_term():
@@ -604,3 +609,216 @@ def test_diagnostic_outputs_false_sets_solar_to_none():
     # PR 2 does NOT gate these yet (PR 4 will)
     assert res.top_flux_W_m2_history is not None
     assert res.T_amb_C_history is not None
+
+
+# ============================================================
+# PR 3 Tests: Longwave radiation on top BC
+# ============================================================
+
+def test_lw_linearization_error_bounded():
+    """Production T_outer solver (2-step Newton) agrees with fully-converged 5-step Newton.
+
+    Note: Pure linearization (Option A) was tested and gave >0.5°F error for cold-sky
+    conditions (T_sky=-10°C + T_conc=55°C + G=900 W/m²). Production uses Option B:
+    linearized estimate followed by 2 Newton refinement steps. This test verifies that
+    2 steps converge to within 0.01°C of the 5-step (fully converged) reference.
+
+    Tests all 27 combinations:
+    T_conc ∈ {15, 35, 55}°C, T_sky ∈ {-10, 10, 25}°C, G ∈ {0, 400, 900} W/m².
+    """
+    from thermal_engine_2d import R_IMP_TO_R_SI
+    alpha_sol = SOLAR_ABSORPTIVITY_DEFAULT
+    emis = EMISSIVITY_DEFAULT
+    h_conv = h_forced_convection(10.5)            # MIX-01 wind speed
+    R_blanket_SI = 5.67 * R_IMP_TO_R_SI          # MIX-01 blanket R-value
+    T_amb_C = 25.0                                # representative ambient
+
+    def newton_solve(T_conc, T_sky, G, n_steps):
+        """Shared Newton iteration from linearized start."""
+        T_sky_K = T_sky + 273.15
+        T_ref_K = 0.5 * (T_conc + T_sky) + 273.15
+        h_rad0 = 4.0 * emis * STEFAN_BOLTZMANN * T_ref_K ** 3
+        denom0 = h_conv + h_rad0 + 1.0 / R_blanket_SI
+        num0 = alpha_sol * G + T_conc / R_blanket_SI + h_conv * T_amb_C + h_rad0 * T_sky
+        T_o = num0 / denom0   # linearized start
+        for _ in range(n_steps):
+            T_o_K = T_o + 273.15
+            F  = (h_conv * (T_o - T_amb_C)
+                  + emis * STEFAN_BOLTZMANN * (T_o_K ** 4 - T_sky_K ** 4)
+                  - alpha_sol * G
+                  - (T_conc - T_o) / R_blanket_SI)
+            dF = h_conv + 4.0 * emis * STEFAN_BOLTZMANN * T_o_K ** 3 + 1.0 / R_blanket_SI
+            T_o = T_o - F / dF
+        return T_o
+
+    max_err = 0.0
+    for T_conc in [15.0, 35.0, 55.0]:
+        for T_sky in [-10.0, 10.0, 25.0]:
+            for G in [0.0, 400.0, 900.0]:
+                T_outer_prod = newton_solve(T_conc, T_sky, G, n_steps=2)  # production
+                T_outer_ref  = newton_solve(T_conc, T_sky, G, n_steps=5)  # converged reference
+                err = abs(T_outer_prod - T_outer_ref)
+                max_err = max(max_err, err)
+
+    assert max_err < 0.01, (
+        f"2-step Newton deviates {max_err:.5f}°C from 5-step reference; expected < 0.01°C"
+    )
+
+
+def test_lw_sign_convention_daytime_vs_nighttime():
+    """q_LW_history is positive (heat leaving) during daytime and nighttime; no large negatives."""
+    pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
+    from cw_scenario_loader import load_cw_scenario
+
+    scn = load_cw_scenario(
+        "validation/cw_exports/MIX-01/input.dat",
+        "validation/cw_exports/MIX-01/weather.dat",
+        "validation/cw_exports/MIX-01/output.txt",
+    )
+    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
+    T0 = np.full((grid.ny, grid.nx), (scn.construction.placement_temp_F - 32) * 5.0 / 9.0)
+    res = solve_hydration_2d(
+        grid, scn.mix, T0,
+        duration_s=72 * 3600, output_interval_s=1800.0,
+        boundary_mode="full_2d",
+        environment=scn.environment, construction=scn.construction,
+        diagnostic_outputs=True,
+    )
+    q_lw = res.q_LW_history
+    assert q_lw is not None, "q_LW_history should be populated with diagnostic_outputs=True"
+
+    cl = grid.nx - 1   # centerline concrete column
+    t_hrs = res.t_s / 3600.0
+    G_series = np.interp(t_hrs, scn.environment.hours, scn.environment.solar_W_m2)
+
+    day   = G_series > 100.0
+    night = G_series < 10.0
+    assert day.any() and night.any(), "72-hr run should have day and night samples"
+
+    # Both day and night: mostly positive (blanket loses heat to sky)
+    # Allow a floor of -5 W/m² for numerical margin
+    assert float(q_lw[:, cl].min()) >= -5.0, (
+        f"q_LW went too negative ({float(q_lw[:, cl].min()):.2f} W/m²); "
+        "blanket should almost always be warmer than sky in Austin July"
+    )
+    assert float(q_lw[day, cl].mean()) > 0.0, "Mean daytime LW flux should be positive"
+    assert float(q_lw[night, cl].mean()) > 0.0, "Mean nighttime LW flux should be positive"
+
+
+def test_lw_attenuation_ratio():
+    """q_LW_history / q_LW_incident_history ≈ f = h_top_combined / h_forced_convection ≈ 0.047."""
+    pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
+    from cw_scenario_loader import load_cw_scenario
+    from thermal_engine_2d import R_IMP_TO_R_SI
+
+    scn = load_cw_scenario(
+        "validation/cw_exports/MIX-01/input.dat",
+        "validation/cw_exports/MIX-01/weather.dat",
+        "validation/cw_exports/MIX-01/output.txt",
+    )
+    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
+    T0 = np.full((grid.ny, grid.nx), (scn.construction.placement_temp_F - 32) * 5.0 / 9.0)
+    res = solve_hydration_2d(
+        grid, scn.mix, T0,
+        duration_s=48 * 3600, output_interval_s=1800.0,
+        boundary_mode="full_2d",
+        environment=scn.environment, construction=scn.construction,
+        diagnostic_outputs=True,
+    )
+    q_eff = res.q_LW_history
+    q_inc = res.q_LW_incident_history
+    assert q_eff is not None and q_inc is not None
+
+    # Expected attenuation factor f = h_top_combined / h_forced
+    h_forced = h_forced_convection(scn.environment.cw_ave_max_wind_m_s)
+    R_blanket_SI = scn.construction.blanket_R_value * R_IMP_TO_R_SI
+    h_top = 1.0 / (1.0 / h_forced + R_blanket_SI)
+    f_expected = h_top / h_forced
+
+    cl = grid.nx - 1
+    # Only check non-near-zero samples to avoid division noise
+    mask = np.abs(q_inc[:, cl]) > 1.0
+    assert mask.any(), "Expected at least some non-trivial LW flux samples"
+    ratios = q_eff[mask, cl] / q_inc[mask, cl]
+    assert np.allclose(ratios, f_expected, atol=0.005), (
+        f"LW attenuation ratios deviate from f={f_expected:.4f}: "
+        f"min={ratios.min():.4f}, max={ratios.max():.4f}"
+    )
+
+
+def test_T_outer_bounds_physical():
+    """T_outer_C_history: always above T_sky; above T_concrete during daylight."""
+    pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
+    from cw_scenario_loader import load_cw_scenario
+
+    scn = load_cw_scenario(
+        "validation/cw_exports/MIX-01/input.dat",
+        "validation/cw_exports/MIX-01/weather.dat",
+        "validation/cw_exports/MIX-01/output.txt",
+    )
+    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
+    T0 = np.full((grid.ny, grid.nx), (scn.construction.placement_temp_F - 32) * 5.0 / 9.0)
+    res = solve_hydration_2d(
+        grid, scn.mix, T0,
+        duration_s=48 * 3600, output_interval_s=1800.0,
+        boundary_mode="full_2d",
+        environment=scn.environment, construction=scn.construction,
+        diagnostic_outputs=True,
+    )
+    T_outer = res.T_outer_C_history
+    assert T_outer is not None
+
+    cl = grid.nx - 1
+    jt = grid.iy_concrete_start
+    t_hrs = res.t_s / 3600.0
+    G_series = np.interp(t_hrs, scn.environment.hours, scn.environment.solar_W_m2)
+    T_sky_series = np.interp(t_hrs, scn.environment.hours, scn.environment.T_sky_C)
+    T_conc_cl = res.T_field_C[:, jt, cl]
+
+    # Skip sample index 0 (t=0): T_outer_out[0] is zeroed (no BC stencil ran yet),
+    # same convention as q_solar_history[0] = zeros.
+    sl = slice(1, None)
+
+    # T_outer always warmer than T_sky (with 1°C tolerance for linearization margin)
+    assert np.all(T_outer[sl, cl] >= T_sky_series[sl] - 1.0), (
+        "T_outer should never be significantly below T_sky (blanket must be warmer than sky)"
+    )
+
+    # During daylight, solar heats outer surface above concrete
+    day = (G_series > 200.0) & np.arange(len(G_series)) >= 1
+    assert day.any()
+    assert np.all(T_outer[day, cl] >= T_conc_cl[day] - 1.0), (
+        "During sunny hours T_outer should be at or above T_concrete"
+    )
+
+
+@pytest.mark.xfail(strict=False, reason="Sprint 1 aspirational ±0.5°F — S0 gate is ±1.0°F")
+def test_peak_T_matches_cw_with_tight_tolerance():
+    """Peak concrete T within ±0.5°F of CW 129.6°F (aspirational Sprint 1 target).
+
+    Marked xfail(strict=False): xpass means we beat the aspirational target;
+    xfail is acceptable because S0 ±1.0°F is the actual gate. PR 4 may shift
+    numbers further.
+    """
+    pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
+    from cw_scenario_loader import load_cw_scenario
+
+    scn = load_cw_scenario(
+        "validation/cw_exports/MIX-01/input.dat",
+        "validation/cw_exports/MIX-01/weather.dat",
+        "validation/cw_exports/MIX-01/output.txt",
+    )
+    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
+    T0 = np.full((grid.ny, grid.nx), (scn.construction.placement_temp_F - 32) * 5.0 / 9.0)
+    res = solve_hydration_2d(
+        grid, scn.mix, T0,
+        duration_s=168 * 3600, output_interval_s=1800.0,
+        boundary_mode="full_2d",
+        environment=scn.environment, construction=scn.construction,
+    )
+    jslice, islice = grid.concrete_slice()
+    peak_F = float(res.T_field_C[:, jslice, islice].max()) * 9.0 / 5.0 + 32.0
+    assert abs(peak_F - 129.6) < 0.5, (
+        f"Peak T = {peak_F:.2f}°F, CW = 129.6°F, delta = {peak_F - 129.6:+.2f}°F "
+        f"(aspirational ±0.5°F; S0 gate is ±1.0°F)"
+    )

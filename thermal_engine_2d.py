@@ -117,9 +117,9 @@ R_FORM_EFFECTIVE_SI = 0.0862   # m²·K/W  (= 0.490 hr·ft²·°F/BTU × 0.1761)
 
 # Solar absorptivity and emissivity defaults for the top concrete surface.
 # absorptivity: ASHRAE default for light-gray concrete/steel form.
-# emissivity: unused in PR 2; PR 3 adds explicit longwave.
 SOLAR_ABSORPTIVITY_DEFAULT = 0.65
 EMISSIVITY_DEFAULT = 0.88
+STEFAN_BOLTZMANN = 5.670374419e-8   # W/(m²·K⁴)
 
 # Default material properties for non-concrete zones
 SOIL_PROPERTIES_2D: dict = {'k': 1.50, 'rho': 2100.0, 'Cp': 900.0}
@@ -550,6 +550,10 @@ class HydrationResult:
     #                           Use this for validation against measured/CW solar inputs.
     q_solar_history: np.ndarray | None = None           # (n_out, nx) W/m²; negative = heat in
     q_solar_incident_history: np.ndarray | None = None  # (n_out, nx) W/m²; negative = heat in
+    # PR 3 LW diagnostics — all None when diagnostic_outputs=False or non-full_2d mode.
+    q_LW_history: np.ndarray | None = None              # (n_out, nx) W/m², effective (positive=heat out)
+    q_LW_incident_history: np.ndarray | None = None     # (n_out, nx) W/m², raw at blanket outer surface
+    T_outer_C_history: np.ndarray | None = None         # (n_out, nx) °C, blanket outer-surface temperature
 
 
 @dataclass
@@ -1168,8 +1172,9 @@ def solve_hydration_2d(
         _h_conv_top     = h_forced_convection(environment.cw_ave_max_wind_m_s)  # kept for non-blanket branch
         _h_top_combined = 1.0 / (1.0 / h_forced_convection(environment.cw_ave_max_wind_m_s) + _R_blanket_SI)
         _h_top_legacy   = 1.0 / (1.0 / _h_convective_legacy(environment.cw_ave_max_wind_m_s) + _R_blanket_SI)
-        # Solar absorptivity for the top concrete surface (PR 2).
+        # Solar absorptivity and LW emissivity for the top blanket outer surface (PR 2/3).
         _alpha_sol_top  = getattr(construction, "solar_absorptivity_top", SOLAR_ABSORPTIVITY_DEFAULT)
+        _emis_top       = getattr(construction, "emissivity_top", EMISSIVITY_DEFAULT)
         _wind_eff = environment.cw_ave_max_wind_m_s * 0.4  # v2 derating
         _RH_frac = 0.005 * (environment.cw_ave_max_RH_pct + environment.cw_ave_min_RH_pct)
         _cure_time = getattr(construction, "top_cure_blanket_time_hrs", 2.0)
@@ -1286,14 +1291,23 @@ def solve_hydration_2d(
         if diagnostic_outputs and boundary_mode == "full_2d":
             q_solar_out          = np.empty((n_samples, nx), dtype=np.float64)
             q_solar_incident_out = np.empty((n_samples, nx), dtype=np.float64)
+            q_lw_out             = np.empty((n_samples, nx), dtype=np.float64)
+            q_lw_incident_out    = np.empty((n_samples, nx), dtype=np.float64)
+            T_outer_out          = np.empty((n_samples, nx), dtype=np.float64)
         else:
             q_solar_out          = None
             q_solar_incident_out = None
+            q_lw_out             = None
+            q_lw_incident_out    = None
+            T_outer_out          = None
     else:
         top_flux_out         = None
         T_amb_out            = None
         q_solar_out          = None
         q_solar_incident_out = None
+        q_lw_out             = None
+        q_lw_incident_out    = None
+        T_outer_out          = None
 
     # ------------------------------------------------------------------ #
     # H. Initial conditions                                                #
@@ -1313,6 +1327,9 @@ def solve_hydration_2d(
         if q_solar_out is not None:
             q_solar_out[0]          = np.zeros(nx)  # no solar at t=0 (no stencil yet)
             q_solar_incident_out[0] = np.zeros(nx)
+            q_lw_out[0]             = np.zeros(nx)
+            q_lw_incident_out[0]    = np.zeros(nx)
+            T_outer_out[0]          = np.zeros(nx)
     next_idx = 1
 
     n_steps = 0
@@ -1450,15 +1467,43 @@ def solve_hydration_2d(
                 #   f ≈ 0.047  →  ~4.7% of α·G reaches the concrete.
                 #   Peak solar 837 W/m² → α·G ≈ 544 W/m² incident, ~25 W/m² to concrete.
                 #
-                # PR 3 LONGWAVE: the same f applies.  Net LW at the blanket outer surface
-                # (σε(T_sky⁴ − T_outer⁴), linearised as h_rad·(T_sky − T_outer)) is
-                # attenuated by f before reaching the concrete.  Use:
-                #   q_lw_effective = q_lw_incident · f
-                # PR 3 must compute radiative emission using T_outer (solved from the
-                # quasi-steady blanket balance above), not T_concrete directly, because
-                # during sunlit hours T_outer >> T_concrete and during nighttime
-                # T_outer << T_concrete — using T_concrete as the emitter gives the
-                # wrong radiative flux sign and magnitude.
+                # ============================================================
+                # LONGWAVE RADIATION (PR 3) — IMPLEMENTATION NOTES
+                # ============================================================
+                # LW emission happens at the blanket outer surface, not at the
+                # concrete. T_outer is solved from the quasi-steady blanket
+                # energy balance (see derivation above) extended to include LW.
+                #
+                # The full balance has a T_outer^4 term (nonlinear). The
+                # linearized Option A (T_ref = (T_conc+T_sky)/2) was tested
+                # and gave >0.5°F error for cold-sky/high-solar combinations
+                # (e.g., T_sky=-10°C, T_conc=55°C, G=900 W/m²) — exceeding
+                # the 0.5°F threshold — so Option B is used: the linearized
+                # estimate is refined by 2 Newton steps on the full T^4 balance.
+                # 2 Newton steps from the linearized start converge to <0.01°C
+                # of the fully converged solution (see test_lw_linearization_error_bounded).
+                #
+                # Linearized initial guess (T_ref = midpoint(T_conc, T_sky)):
+                # h_rad = 4·ε·σ·T_ref^3
+                # T_outer_0 = [α·G + T_conc/R + h_conv·T_amb + h_rad·T_sky]
+                #             / (h_conv + h_rad + 1/R)
+                #
+                # Newton refinement (2 steps; F = residual of full T^4 balance):
+                # F(T_o) = h_conv·(T_o−T_amb) + ε·σ·(T_o_K^4−T_sky_K^4) − α·G − (T_conc−T_o)/R
+                # dF/dT_o = h_conv + 4·ε·σ·T_o_K^3 + 1/R
+                # T_o ← T_o − F/dF
+                #
+                # LW flux into concrete is attenuated by the same factor f as
+                # solar (derivation above), since both fluxes travel the same
+                # path from blanket outer surface through R_blanket to concrete:
+                # q_lw_effective = ε·σ·(T_outer^4 − T_sky^4) · f
+                # where f = h_top_combined / h_forced_convection.
+                #
+                # DIAGNOSTIC SEMANTICS (consistent with PR 2 solar):
+                # q_LW_incident_history: raw LW exchange at blanket outer surface
+                # q_LW_history:          effective LW flux into concrete (= incident · f)
+                # T_outer_C_history:     blanket outer-surface temperature
+                # All three populated when diagnostic_outputs=True.
                 # ─────────────────────────────────────────────────────────────────────
                 _solar_W_m2 = getattr(environment, 'solar_W_m2', None)
                 _env_hours  = getattr(environment, 'hours', None)
@@ -1471,7 +1516,44 @@ def solve_hydration_2d(
                 _q_solar_incident = np.where(grid.is_air[_j_top, :], 0.0, _q_solar_scalar)
                 # Attenuated flux reaching concrete surface: multiply by f = h_top/h_conv
                 _q_solar_eff      = _q_solar_incident * (_h_top_combined / _h_conv_top)
-                _q_top_c   = _q_conv_c + _q_evap_c + _q_solar_eff
+                # PR 3: LW balance at blanket outer surface — Newton iteration (Option B)
+                # Starts from linearized estimate, then refines 2 steps on full T^4 balance.
+                # Option A (pure linearization) was tested and gave >0.5°F error for
+                # cold-sky / high-solar combinations → Option B required per spec.
+                _T_sky_arr = getattr(environment, 'T_sky_C', None)
+                if _T_sky_arr is not None and len(_T_sky_arr) > 0 and _env_hours is not None:
+                    _T_sky_C_t = float(np.interp(t_hrs, _env_hours, _T_sky_arr))
+                    _T_sky_K   = _T_sky_C_t + 273.15
+                    _T_conc_C  = _T_surf_c   # (nx,) at j=iy_concrete_start
+                    # Linearized initial guess: T_ref = midpoint(T_conc, T_sky)
+                    _T_ref_K   = 0.5 * (_T_conc_C + _T_sky_C_t) + 273.15
+                    _h_rad0    = 4.0 * _emis_top * STEFAN_BOLTZMANN * _T_ref_K ** 3
+                    _denom_o   = _h_conv_top + _h_rad0 + 1.0 / _R_blanket_SI
+                    _num_o     = (_alpha_sol_top * _G_t
+                                  + _T_conc_C / _R_blanket_SI
+                                  + _h_conv_top * _T_amb_C
+                                  + _h_rad0 * _T_sky_C_t)
+                    _T_outer_C = _num_o / _denom_o   # initial (linearized) estimate (nx,) °C
+                    # 2 Newton steps on full T^4 balance (vectorised over nx columns)
+                    for _lw_iter in range(2):
+                        _T_o_K = _T_outer_C + 273.15
+                        _F_lw  = (_h_conv_top * (_T_outer_C - _T_amb_C)
+                                  + _emis_top * STEFAN_BOLTZMANN * (_T_o_K ** 4 - _T_sky_K ** 4)
+                                  - _alpha_sol_top * _G_t
+                                  - (_T_conc_C - _T_outer_C) / _R_blanket_SI)
+                        _dF_lw = (_h_conv_top
+                                  + 4.0 * _emis_top * STEFAN_BOLTZMANN * _T_o_K ** 3
+                                  + 1.0 / _R_blanket_SI)
+                        _T_outer_C = _T_outer_C - _F_lw / _dF_lw
+                    _T_outer_K = _T_outer_C + 273.15
+                    _q_lw_incident = _emis_top * STEFAN_BOLTZMANN * (_T_outer_K ** 4 - _T_sky_K ** 4)
+                    _q_lw_incident = np.where(grid.is_air[_j_top, :], 0.0, _q_lw_incident)
+                    _q_lw_eff  = _q_lw_incident * (_h_top_combined / _h_conv_top)
+                else:
+                    _T_outer_C     = _T_surf_c.copy()    # no sky data: T_outer ≈ T_concrete
+                    _q_lw_incident = np.zeros(nx)
+                    _q_lw_eff      = np.zeros(nx)
+                _q_top_c   = _q_conv_c + _q_evap_c + _q_solar_eff + _q_lw_eff
                 _q_cond_c  = k_y_face[_j_top, :] * (T[_j_top + 1, :] - _T_surf_c) / _dy_conc_top
                 T_new[_j_top, :] = np.where(
                     grid.is_air[_j_top, :],
@@ -1660,15 +1742,53 @@ def solve_hydration_2d(
                     _jt  = grid.iy_concrete_start
                     _sol = getattr(environment, 'solar_W_m2', None)
                     _hrs = getattr(environment, 'hours', None)
+                    _t_s_hr = t / 3600.0
                     if _sol is not None and len(_sol) > 0:
-                        _G_s      = float(np.interp(t / 3600.0, _hrs, _sol))
+                        _G_s      = float(np.interp(_t_s_hr, _hrs, _sol))
                         _inc_s    = np.where(grid.is_air[_jt, :], 0.0, -_alpha_sol_top * _G_s)
                         _atten_s  = _inc_s * (_h_top_combined / _h_conv_top)
                     else:
+                        _G_s     = 0.0
                         _inc_s   = np.zeros(nx)
                         _atten_s = np.zeros(nx)
                     q_solar_out[next_idx]          = _atten_s   # flux entering concrete
                     q_solar_incident_out[next_idx] = _inc_s     # raw at blanket outer surface
+                    # PR 3: recompute LW at exact sample time
+                    _T_sky_arr_s = getattr(environment, 'T_sky_C', None)
+                    if _T_sky_arr_s is not None and len(_T_sky_arr_s) > 0 and _hrs is not None:
+                        _T_amb_s_F = ambient_temp_F(_t_s_hr, environment, _placement_hour)
+                        _T_amb_s_C = (_T_amb_s_F - 32.0) * 5.0 / 9.0
+                        _T_sky_s   = float(np.interp(_t_s_hr, _hrs, _T_sky_arr_s))
+                        _T_sky_s_K = _T_sky_s + 273.15
+                        _T_c_s     = T[_jt, :]               # post-swap, shape (nx,)
+                        _T_ref_s_K = 0.5 * (_T_c_s + _T_sky_s) + 273.15
+                        _h_rad_s0  = 4.0 * _emis_top * STEFAN_BOLTZMANN * _T_ref_s_K ** 3
+                        _denom_s   = _h_conv_top + _h_rad_s0 + 1.0 / _R_blanket_SI
+                        _num_s     = (_alpha_sol_top * _G_s
+                                      + _T_c_s / _R_blanket_SI
+                                      + _h_conv_top * _T_amb_s_C
+                                      + _h_rad_s0 * _T_sky_s)
+                        _T_outer_s = _num_s / _denom_s   # linearized initial estimate
+                        for _lw_iter_s in range(2):
+                            _T_o_s_K = _T_outer_s + 273.15
+                            _F_s  = (_h_conv_top * (_T_outer_s - _T_amb_s_C)
+                                     + _emis_top * STEFAN_BOLTZMANN * (_T_o_s_K ** 4 - _T_sky_s_K ** 4)
+                                     - _alpha_sol_top * _G_s
+                                     - (_T_c_s - _T_outer_s) / _R_blanket_SI)
+                            _dF_s = (_h_conv_top
+                                     + 4.0 * _emis_top * STEFAN_BOLTZMANN * _T_o_s_K ** 3
+                                     + 1.0 / _R_blanket_SI)
+                            _T_outer_s = _T_outer_s - _F_s / _dF_s
+                        _T_outer_s_K = _T_outer_s + 273.15
+                        _q_lw_inc_s  = _emis_top * STEFAN_BOLTZMANN * (_T_outer_s_K ** 4 - _T_sky_s_K ** 4)
+                        _q_lw_inc_s  = np.where(grid.is_air[_jt, :], 0.0, _q_lw_inc_s)
+                        q_lw_out[next_idx]          = _q_lw_inc_s * (_h_top_combined / _h_conv_top)
+                        q_lw_incident_out[next_idx] = _q_lw_inc_s
+                        T_outer_out[next_idx]       = np.where(grid.is_air[_jt, :], np.nan, _T_outer_s)
+                    else:
+                        q_lw_out[next_idx]          = np.zeros(nx)
+                        q_lw_incident_out[next_idx] = np.zeros(nx)
+                        T_outer_out[next_idx]       = np.zeros(nx)
             next_idx += 1
 
     # ------------------------------------------------------------------ #
@@ -1694,4 +1814,7 @@ def solve_hydration_2d(
         T_amb_C_history=T_amb_out,
         q_solar_history=q_solar_out,
         q_solar_incident_history=q_solar_incident_out,
+        q_LW_history=q_lw_out,
+        q_LW_incident_history=q_lw_incident_out,
+        T_outer_C_history=T_outer_out,
     )
