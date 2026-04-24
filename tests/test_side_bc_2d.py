@@ -51,6 +51,8 @@ class ConstrStub:
     top_cure_blanket_time_hrs: float = 2.0
     placement_hour: int = 5
     placement_temp_F: float = 60.0
+    soil_lag_hrs: float = 0.0
+    soil_damping: float = 1.0
 
 
 @dataclass

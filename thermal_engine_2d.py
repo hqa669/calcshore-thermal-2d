@@ -1481,8 +1481,9 @@ def solve_hydration_2d(
     t_out     = np.empty(n_samples, dtype=np.float64)
 
     if _use_top_bc:
-        top_flux_out = np.empty((n_samples, nx), dtype=np.float64)
-        T_amb_out    = np.empty(n_samples, dtype=np.float64)
+        top_flux_out  = np.empty((n_samples, nx), dtype=np.float64)
+        T_amb_out     = np.empty(n_samples, dtype=np.float64)
+        T_ground_out  = np.empty(n_samples, dtype=np.float64)
         if diagnostic_outputs and boundary_mode == "full_2d":
             _n_side_rows = grid.iy_concrete_end - 1   # j=1..iy_concrete_end-1
             q_solar_out          = np.empty((n_samples, nx), dtype=np.float64)
@@ -1518,6 +1519,7 @@ def solve_hydration_2d(
     else:
         top_flux_out         = None
         T_amb_out            = None
+        T_ground_out         = None
         q_solar_out          = None
         q_solar_incident_out = None
         q_lw_out             = None
@@ -1546,6 +1548,15 @@ def solve_hydration_2d(
         _T_amb_F_0 = ambient_temp_F(0.0, environment, _placement_hour)
         _T_amb_C_0 = (_T_amb_F_0 - 32.0) * 5.0 / 9.0
         T_amb_out[0]    = _T_amb_C_0
+        T_ground_out[0] = (
+            ground_surface_temperature_C(
+                0.0, environment,
+                construction.soil_lag_hrs, construction.soil_damping,
+                _placement_hour,
+            )
+            if getattr(environment, 'T_air_F', None) is not None
+            else _T_amb_C_0
+        )
         top_flux_out[0] = np.zeros(nx)   # no flux at t=0 (no stencil yet)
         if q_solar_out is not None:
             q_solar_out[0]          = np.zeros(nx)  # no solar at t=0 (no stencil yet)
@@ -1909,7 +1920,12 @@ def solve_hydration_2d(
                 # 2 Newton steps on full T⁴ residual (same convergence guarantee as PR 3)
                 for _f_iter in range(2):
                     _T_o_K   = _T_outer_form_C + 273.15
-                    _T_gnd_K = _T_amb_C + 273.15   # T_ground = T_amb (PR 6 baseline)
+                    _T_gnd_C = ground_surface_temperature_C(
+                        t_hrs, environment,
+                        construction.soil_lag_hrs, construction.soil_damping,
+                        _placement_hour,
+                    )
+                    _T_gnd_K = _T_gnd_C + 273.15   # PR 11: Barber lag+damp
                     _F_lw = (
                         _h_conv_vert * (_T_outer_form_C - _T_amb_C)
                         + _emis_side * STEFAN_BOLTZMANN * F_SKY_VERT
@@ -2083,6 +2099,15 @@ def solve_hydration_2d(
             if _use_top_bc:
                 top_flux_out[next_idx] = _q_top
                 T_amb_out[next_idx]    = _T_amb_C
+                T_ground_out[next_idx] = (
+                    ground_surface_temperature_C(
+                        t / 3600.0, environment,
+                        construction.soil_lag_hrs, construction.soil_damping,
+                        _placement_hour,
+                    )
+                    if getattr(environment, 'T_air_F', None) is not None
+                    else _T_amb_C
+                )
                 if q_solar_out is not None:
                     # Recompute at exact sample time (BC was computed at t-dt).
                     _jt  = grid.iy_concrete_start
@@ -2170,7 +2195,12 @@ def solve_hydration_2d(
                                           + _h_rad0_s * _T_eff_sky_C_s
                                           + _alpha_sol_side * _F_vert * _G_s * _daytime_s)
                         _T_outer_form_s = _num_s / _denom_s
-                        _T_gnd_K_s = _T_amb_s_C + 273.15
+                        _T_gnd_C_s = ground_surface_temperature_C(
+                            _t_s_hr, environment,
+                            construction.soil_lag_hrs, construction.soil_damping,
+                            _placement_hour,
+                        )
+                        _T_gnd_K_s = _T_gnd_C_s + 273.15   # PR 11: Barber lag+damp
                         for _fs_iter in range(2):
                             _T_o_K_s = _T_outer_form_s + 273.15
                             _F_s = (
@@ -2249,4 +2279,5 @@ def solve_hydration_2d(
         q_side_conv_history=q_side_conv_out,
         q_side_total_history=q_side_total_out,
         T_outer_form_C_history=T_outer_form_out,
+        T_ground_C_history=T_ground_out,
     )

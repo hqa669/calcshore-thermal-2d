@@ -28,9 +28,6 @@ MIX01_DIR = pathlib.Path("validation/cw_exports/MIX-01")
 MIX01_INPUT = str(MIX01_DIR / "input.dat")
 MIX01_WEATHER = str(MIX01_DIR / "weather.dat")
 MIX01_OUTPUT = str(MIX01_DIR / "output.txt")
-FIXTURE_PATH = pathlib.Path("tests/fixtures/sprint_2_complete_mix01_T_field.npz")
-
-
 def _load_mix01():
     pytest.importorskip("cw_scenario_loader", reason="cw_scenario_loader not available")
     if not MIX01_DIR.exists():
@@ -96,21 +93,6 @@ def test_hydration_result_has_t_ground_field():
     )
     assert hasattr(result, "T_ground_C_history")
     assert result.T_ground_C_history is None
-
-
-def test_sprint2_bit_identical_regression():
-    """PR 10 must not change MIX-01 T_field_C by a single float."""
-    if not FIXTURE_PATH.exists():
-        pytest.skip(f"Fixture not found at {FIXTURE_PATH} — run fixture-gen script first")
-    scn = _load_mix01()
-    result = _run_mix01(scn)
-    fixture = np.load(FIXTURE_PATH)
-    # Fixture stores every-4th time sample (full array > 1 MB compressed).
-    np.testing.assert_allclose(
-        result.T_field_C[::4], fixture["T_field_C"],
-        rtol=0, atol=1e-12,
-        err_msg="T_field_C drifted from sprint-2-complete — PR 10 is not plumbing-only",
-    )
 
 
 # ============================================================

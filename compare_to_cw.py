@@ -415,7 +415,7 @@ def _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
         ax.axhline(0.0, color="gray", alpha=0.3, linestyle=":")
         ax.set_xlabel("t (hr)"); ax.set_ylabel("q_lw (W/m²)")
         ax.legend(fontsize=8)
-    ax.set_title("(k) Form-face longwave (W/m², positive=heat out)")
+    ax.set_title("(k) Form-face longwave (Barber T_ground, lag=5.0h, damp=0.7; W/m², positive=heat out)")
 
     # (l) Total form-face flux decomposition — parallels (i); no evap on side face
     ax = axes[3, 2]
