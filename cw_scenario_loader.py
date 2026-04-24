@@ -174,14 +174,14 @@ class CWConstruction:
     emissivity_top: float = 0.88           # blanket outer surface emissivity
     solar_absorptivity_side: float = 0.65  # steel form (similar to light concrete)
     emissivity_side: float = 0.88          # steel form emissivity
-    # F_vert = 0.5: physical flat-projection factor for a vertical face under
-    # diffuse-dominated solar loading. PR 7 (M6c) enables this default after
-    # PR 6 landed the LW cooling path as a physical counterweight. ACI 207.2R
-    # Eq 27 orientation refinement deferred to PR 8 (M6d).
-    vertical_solar_factor: float = 0.5    # F_vert: flat projection factor for vertical face
+    # F_vert is normally resolved via form_orientation → F_VERT_BY_ORIENTATION
+    # lookup in the engine (PR 8, M6d). This field is an optional override used
+    # for sweeps, calibration, and ablation tests. None means use the lookup.
+    vertical_solar_factor: float | None = None
     form_removal_hrs: float = 168.0
     form_color: str = "Red"
     form_type: str = "Steel"
+    form_orientation: str = "unknown"     # {"south","east","west","north","unknown"}
 
     side_cure_method: str = "Wet Blanket"
     top_cure_method_1: str = "Wet blanket"

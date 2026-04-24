@@ -115,44 +115,33 @@ FORM_R_SI = 0.0   # m²·K/W
 R_FORM_EFFECTIVE_SI = 0.0862   # m²·K/W  (= 0.490 hr·ft²·°F/BTU × 0.1761)
 
 # Vertical-surface solar projection factor: fraction of horizontal irradiance
-# incident on a vertical form face. F_vert = 0.5 is the correct flat-projection
-# value for a randomly oriented vertical surface at mid-latitude (geometry only).
+# incident on a vertical form face.
 #
-# WHY CWConstruction.vertical_solar_factor DEFAULTS TO 0.0 (DARK INFRASTRUCTURE):
+# PR 8 (M6d): F_vert is now resolved via form_orientation → F_VERT_BY_ORIENTATION
+# lookup. CWConstruction.vertical_solar_factor is an optional override for sweeps
+# and ablation tests; None means use the lookup.
 #
-# An empirical F_vert sweep on MIX-01 (168-hr solve, R_FORM_EFFECTIVE_SI in place)
-# showed Corner RMS monotonically worsening with increasing F_vert — the opposite
-# of what the retrospective "missing solar" hypothesis predicted:
-#
-#   F_vert | Corner RMS | Peak Grad Δ  | Peak Max T Δ
-#   -------|------------|-------------|-------------
-#     0.0  |  4.10°F   |  -0.95°F ✓  |  -0.33°F ✓
-#     0.3  |  9.23°F   |  -5.67°F ✗  |  -0.33°F ✓
-#     0.5  | 14.58°F   |  -4.78°F ✗  |  +0.02°F ✓
-#     0.7  | 20.13°F   |  +4.35°F ✗  |  +7.76°F ✗
-#     1.0  | 28.58°F   |  +17.94°F ✗ | +22.28°F ✗
-#
-# Diagnosis: CW's corner diurnal mismatch is NOT a missing-solar problem; it is a
-# missing-LW-at-night problem on the vertical form face. Engine corner is ~3°F too
-# warm vs CW at night (not at solar noon — they match at noon), meaning CW applies
-# nighttime LW cooling at the form face that the Sprint 1 model lacks. Increasing
-# F_vert injects daytime solar heat that pushes corner further from CW by day while
-# doing nothing to close the nighttime gap. F_vert=0.0 is the best-performing value
-# across all metrics and the only configuration where all other S0 gates pass.
-#
-# SPRINT 2 SOLUTION PATH: T_outer solve on the vertical form face (analogous to
-# Option-B Newton solve on the horizontal blanket outer surface from PR 3). Side-face
-# LW q = ε·σ·(T_outer_form^4 − T_sky^4) applied at the OUTER form surface, conducted
-# through R_FORM_EFFECTIVE_SI to the concrete, will provide the missing nighttime
-# radiative cooling without bloating the daytime temperature. Once that is in place,
-# F_vert can be re-swept against the corrected thermal baseline to calibrate the
-# solar contribution correctly. ACI 207.2R Eq 27 provides the orientation model.
-#
-# PR 7 (M6c) RESOLUTION: F_vert default flipped 0.0 → 0.5 in
-# cw_scenario_loader.py after PR 6 landed the LW cooling path. The
-# original monotonic worsening was an artifact of missing LW; with LW
-# in place, F_vert=0.5 closes Corner RMS as predicted.
-VERTICAL_SOLAR_FACTOR_DEFAULT = 0.5   # dimensionless — correct geometry; see above
+# Historical note: before PR 6 (missing LW cooling), the Sprint 1 sweep showed
+# F_vert monotonically worsening Corner RMS (the "dark infrastructure" result,
+# PR 5 comments). After PR 6 landed the vertical-face LW solve, PR 7 activated
+# F_vert=0.5 which recovered amplitude and phase. PR 8 calibrated the value to
+# F_vert=0.15 (MIX-01, ACI Eq 27 h_conv_vertical).
+VERTICAL_SOLAR_FACTOR_DEFAULT = 0.15  # dimensionless — MIX-01 calibrated (PR 8)
+
+# F_vert lookup by form orientation.
+# Flat-projection approximations for a vertical form face under summer loading at
+# ~30°N latitude. The "unknown" entry is the MIX-01-calibrated fallback (PR 8,
+# ACI 207.2R Eq 27 h_conv_vertical active). Other entries are geometric
+# best-guesses from the Duffie-Beckman vertical projection; not independently
+# validated. Sprint 3+ will populate with 15-mix validation data or replace with
+# a latitude/day computation.
+F_VERT_BY_ORIENTATION: dict[str, float] = {
+    "south":   0.35,   # south-facing: summer sun high, grazes vertical
+    "east":    0.42,   # east-facing: morning sun nearly normal to face
+    "west":    0.42,   # west-facing: afternoon sun nearly normal to face
+    "north":   0.20,   # north-facing: diffuse only
+    "unknown": 0.15,   # MIX-01 calibrated, PR 8 (see calibration sweep notes)
+}
 
 # Solar absorptivity and emissivity defaults for the top concrete surface.
 # absorptivity: ASHRAE default for light-gray concrete/steel form.
@@ -425,6 +414,26 @@ def h_forced_convection(wind_m_s_max: float) -> float:
     float  Forced-convection heat transfer coefficient W/(m²·K).
     """
     return 5.6 + 3.5 * (0.4 * wind_m_s_max)
+
+
+def h_forced_convection_vertical(wind_m_s_max: float) -> float:
+    """Pure forced-convection coefficient for a vertical face.
+
+    ACI 207.2R Eq 27 / Duffie-Beckman parallel-flow: wind shears parallel
+    to a vertical surface rather than scouring normal to it, so both the
+    base coefficient and wind sensitivity are reduced vs h_forced_convection().
+
+    Parameters
+    ----------
+    wind_m_s_max : float
+        Average-max wind speed in m/s (env.cw_ave_max_wind_m_s).
+
+    Returns
+    -------
+    float
+        Forced-convection heat transfer coefficient on vertical face, W/(m²·K).
+    """
+    return 4.0 + 2.5 * (0.4 * wind_m_s_max)
 
 
 def _h_convective_legacy(wind_m_s_max: float) -> float:
@@ -1290,14 +1299,19 @@ def solve_hydration_2d(
         # M4 side BC: h_side for the form face (PR 4: pure forced convection)
         _h_side = h_side_convective(environment.cw_ave_max_wind_m_s, _r_blanket)
         # PR 6: pure convective h for the T_outer_form Newton solve (no R_form baked in)
-        _h_conv_vert = h_forced_convection(environment.cw_ave_max_wind_m_s)
+        # PR 8: ACI 207.2R Eq 27 — vertical face uses h_forced_convection_vertical, not horizontal
+        _h_conv_vert = h_forced_convection_vertical(environment.cw_ave_max_wind_m_s)
         _ix_cs = grid.ix_concrete_start     # column index of concrete form edge
         # PR 4 side-face radiation properties
         _alpha_sol_side = getattr(construction, "solar_absorptivity_side", SOLAR_ABSORPTIVITY_DEFAULT)
         _emis_side      = getattr(construction, "emissivity_side", EMISSIVITY_DEFAULT)
-        _F_vert         = getattr(construction, "vertical_solar_factor", VERTICAL_SOLAR_FACTOR_DEFAULT)
-        # _F_vert = 0.5 (PR 7 default). ACI 207.2R Eq 27 orientation refinement deferred to PR 8.
-        # Force F_vert=0.0 via dataclasses.replace for the ablation case (disable side solar).
+        _form_orientation = getattr(construction, "form_orientation", "unknown")
+        _F_vert_from_orient = F_VERT_BY_ORIENTATION.get(
+            _form_orientation, F_VERT_BY_ORIENTATION["unknown"]
+        )
+        # Explicit vertical_solar_factor takes precedence for sweeps/calibration/ablation.
+        _F_vert_override = getattr(construction, "vertical_solar_factor", None)
+        _F_vert = _F_vert_override if _F_vert_override is not None else _F_vert_from_orient
 
     # ------------------------------------------------------------------ #
     # B. Soil and blanket material properties                              #

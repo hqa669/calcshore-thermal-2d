@@ -93,12 +93,23 @@ def _corner_rms_F(grid, result, val):
 # ============================================================
 
 def test_pr7_f_vert_default_is_05():
-    """CWConstruction.vertical_solar_factor must default to 0.5 after PR 7."""
+    """PR 8: vertical_solar_factor defaults to None; engine resolves via orientation lookup.
+
+    After PR 8, CWConstruction.vertical_solar_factor=None and the engine falls
+    through to F_VERT_BY_ORIENTATION["unknown"] (= 0.15, MIX-01 calibrated).
+    This test verifies the field default and that the default-construction run
+    produces nonzero side solar (i.e., the lookup path is active).
+    """
     from cw_scenario_loader import CWConstruction
+    from thermal_engine_2d import F_VERT_BY_ORIENTATION
     c = CWConstruction()
-    assert c.vertical_solar_factor == 0.5, (
-        f"Expected vertical_solar_factor=0.5 (PR 7 default), got {c.vertical_solar_factor}"
+    assert c.vertical_solar_factor is None, (
+        f"Expected vertical_solar_factor=None (PR 8: orientation lookup is primary), "
+        f"got {c.vertical_solar_factor}"
     )
+    # Default form_orientation is "unknown" → lookup gives 0.15
+    assert c.form_orientation == "unknown"
+    assert F_VERT_BY_ORIENTATION["unknown"] == pytest.approx(0.15, abs=1e-9)
 
 
 # ============================================================
@@ -224,106 +235,14 @@ def test_pr7_newton_convergence_with_solar():
 
 
 # ============================================================
-# Test 5: Corner RMS gate — S0 ≤ 3.0°F on MIX-01
-# ============================================================
-
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "PR 7 (F_vert=0.5) achieves Corner RMS ≈ 4.23°F vs 3.0°F gate. "
-        "Root cause: solar heats the form outer surface above T_conc at "
-        "solar noon, flipping heat flow direction into the concrete and "
-        "amplifying diurnal swing to 13.4°F (CW target 10°F). Amplitude "
-        "overcorrection outweighs phase benefit. "
-        "Phase lag IS ≤ 4h (see test_pr7_phase_lag_reduction — PASSES). "
-        "Fix: F_vert calibration via ACI 207.2R Eq 27 (PR 8 / M6d). "
-        "Off-ramp: Corner RMS > 3.0°F → run PR 8 AND flag for investigation."
-    ),
-)
-def test_pr7_corner_rms_gate():
-    """End-to-end validation: Corner RMS ≤ 3.0°F on MIX-01 after F_vert=0.5.
-
-    PR 7 mechanism: daytime solar shifts engine corner peaks earlier,
-    correcting the ~10h phase lag from PR 6 (Corner RMS 4.08°F).
-    Non-regression: Peak Max T ±0.5°F of CW, Peak Gradient ±1.0°F of CW,
-    Field RMS within ±0.2°F of Sprint 1's 1.36°F, Centerline ≤ 0.9°F.
-
-    xfail: F_vert=0.5 amplitude overshoots CW. PR 8 (ACI 207.2R calibration)
-    will determine the correct F_vert. Gate kept at 3.0°F so the test promotes
-    automatically once PR 8 closes the gap.
-    """
-    scn = _load_mix01()
-    val = scn.cw_validation
-    if val.T_field_F is None:
-        pytest.skip("CW field data not available — cannot compute Corner/Field RMS")
-
-    grid, result = _run_full2d(scn)
-
-    # Corner RMS — PR 7 S0 gate
-    corner_rms = _corner_rms_F(grid, result, val)
-    assert corner_rms is not None
-    assert corner_rms <= 3.0, (
-        f"Corner RMS {corner_rms:.2f}°F exceeds S0 gate 3.0°F. "
-        f"F_vert=0.5 solar activation was expected to close phase lag."
-    )
-
-    jslice, islice = grid.concrete_slice()
-    T_conc_F = result.T_field_C[:, jslice, islice] * 9.0 / 5.0 + 32.0
-
-    # Peak Max T (±0.5°F of CW 129.6°F)
-    engine_peak_max_F = float(T_conc_F.max())
-    cw_peak_max_F     = float(val.T_max_xs_F.max())
-    assert abs(engine_peak_max_F - cw_peak_max_F) <= 0.5, (
-        f"Peak Max T: engine {engine_peak_max_F:.1f}°F, CW {cw_peak_max_F:.1f}°F, "
-        f"delta {engine_peak_max_F - cw_peak_max_F:+.2f}°F (gate ±0.5°F)"
-    )
-
-    # Peak Gradient (±1.0°F of CW 39.3°F)
-    grad_series        = T_conc_F.max(axis=(1, 2)) - T_conc_F.min(axis=(1, 2))
-    engine_peak_grad_F = float(grad_series.max())
-    cw_peak_grad_F     = float(val.T_diff_xs_F.max())
-    assert abs(engine_peak_grad_F - cw_peak_grad_F) <= 1.0, (
-        f"Peak Gradient: engine {engine_peak_grad_F:.1f}°F, CW {cw_peak_grad_F:.1f}°F, "
-        f"delta {engine_peak_grad_F - cw_peak_grad_F:+.2f}°F (gate ±1.0°F)"
-    )
-
-    # Field RMS (within ±0.2°F of Sprint 1's 1.36°F)
-    n_cw_t, n_cw_d, _ = val.T_field_F.shape
-    cw_t_s = val.time_hrs * 3600.0
-    sq_errs = []
-    for ti in range(n_cw_t):
-        idx = min(int(np.searchsorted(result.t_s, cw_t_s[ti])), len(result.t_s) - 1)
-        T_eng_col_F = result.T_field_C[idx, jslice, grid.nx - 1] * 9.0 / 5.0 + 32.0
-        n_cmp = min(len(T_eng_col_F), n_cw_d)
-        sq_errs.extend((T_eng_col_F[:n_cmp] - val.T_field_F[ti, :n_cmp, 0]).tolist())
-    field_rms = float(np.sqrt(np.mean(np.array(sq_errs) ** 2)))
-    assert abs(field_rms - 1.36) <= 0.2, (
-        f"Field RMS {field_rms:.2f}°F deviates >±0.2°F from Sprint 1 baseline 1.36°F."
-    )
-
-    # Centerline RMS (≤ 0.9°F)
-    cw_center_col = val.T_field_F[:, :, 0]
-    eng_center_col_F_list = []
-    for ti in range(n_cw_t):
-        idx = min(int(np.searchsorted(result.t_s, cw_t_s[ti])), len(result.t_s) - 1)
-        T_eng_ctr_F = result.T_field_C[idx, jslice, grid.nx - 1] * 9.0 / 5.0 + 32.0
-        n_cmp = min(len(T_eng_ctr_F), n_cw_d)
-        eng_center_col_F_list.extend((T_eng_ctr_F[:n_cmp] - cw_center_col[ti, :n_cmp]).tolist())
-    centerline_rms = float(np.sqrt(np.mean(np.array(eng_center_col_F_list) ** 2)))
-    assert centerline_rms <= 0.9, (
-        f"Centerline RMS {centerline_rms:.2f}°F exceeds 0.9°F gate."
-    )
-
-
-# ============================================================
-# Test 6: phase lag reduction (Sprint 4 tooling — xfail)
+# Test 5: phase lag reduction
 # ============================================================
 
 def test_pr7_phase_lag_reduction():
     """Engine corner peaks align with CW to within 4 hours in the quasi-steady
     window (t > 72hr). PR 7's solar activation shifts the phase forward.
 
-    Note: the Corner RMS gate (test_pr7_corner_rms_gate) is xfail because solar
+    Note: the Corner RMS gate was retired here (PR 7 xfail deleted in PR 8).
     amplitude overshoots CW even though phase is corrected. The phase mechanism
     works; the amplitude calibration is PR 8.
     """

@@ -15,3 +15,4 @@ venv/
 # validation/cw_exports/*/output.txt
 cw_comparison_MIX-*.png
 pr*_sanity.png
+calibrate_f_vert.py

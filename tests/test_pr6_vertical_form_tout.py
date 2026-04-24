@@ -341,9 +341,13 @@ def test_pr6_corner_rms_improves():
     # Corner RMS — PR 6 gate: no regression from Sprint 1 (4.15°F margin)
     corner_rms = _corner_rms_F(grid, result, val)
     assert corner_rms is not None
-    assert corner_rms <= 4.15, (
-        f"Corner RMS {corner_rms:.2f}°F regressed beyond Sprint 1's 4.10°F baseline. "
-        f"The LW activation should not worsen corner error; check sign of q_side_total."
+    # PR 8 note: ACI Eq 27 h_conv_vertical (lower h than horizontal) shifts
+    # this LW-only baseline from 4.10°F → 4.32°F. Threshold updated from
+    # 4.15 to 4.40 to reflect the new h. The LW activation is still correct;
+    # the baseline shift is the expected effect of the lower vertical h.
+    assert corner_rms <= 4.40, (
+        f"Corner RMS {corner_rms:.2f}°F regressed beyond h_vert LW-only baseline. "
+        f"Check sign of q_side_total or h_conv_vertical formula."
     )
 
     # Peak Max T non-regression (±0.5°F of CW 129.6°F)
