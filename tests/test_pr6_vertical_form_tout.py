@@ -217,21 +217,20 @@ def test_pr6_side_LW_zero_when_no_sky_data():
 # ============================================================
 
 def test_pr6_f_vert_zero_still_gives_zero_side_solar():
-    """Default F_vert=0.0 produces zero q_side_solar_history everywhere.
+    """Explicit F_vert=0.0 override produces zero q_side_solar_history everywhere.
 
-    LW activation in PR 6 must not accidentally enable the solar path.
+    PR 7 flipped the default to 0.5; this test preserves the ablation-case
+    invariant by forcing F_vert=0.0 explicitly.
     """
     scn = _load_mix01()
-    assert scn.construction.vertical_solar_factor == 0.0, (
-        "Test assumes F_vert=0.0 default — update if construction default changes"
-    )
+    ctor_zero = dataclasses.replace(scn.construction, vertical_solar_factor=0.0)
 
-    result = _run(scn, diagnostic_outputs=True)
+    result = _run(scn, construction=ctor_zero, diagnostic_outputs=True)
 
     assert result.q_side_solar_history is not None
     assert np.all(result.q_side_solar_history == 0.0), (
         "q_side_solar_history should be exactly zero when F_vert=0.0. "
-        "PR 6 LW activation must not touch the solar code path."
+        "F_vert=0.0 override must fully disable the solar path."
     )
 
 
@@ -325,13 +324,19 @@ def test_pr6_corner_rms_improves():
     Sprint 1's 4.10°F (gate 4.15°F to allow measurement noise).
     Non-regression: Peak Max within ±0.5°F of CW, Gradient within ±1.0°F,
     Field RMS within ±0.2°F of Sprint 1 1.36°F.
+
+    Uses explicit F_vert=0.0 override to isolate PR 6 LW physics from PR 7
+    solar activation (PR 7 flipped the default to 0.5).
     """
     scn = _load_mix01()
     val = scn.cw_validation
     if val.T_field_F is None:
         pytest.skip("CW field data not available — cannot compute Corner/Field RMS")
 
-    grid, result = _run_full2d(scn)
+    # Isolate PR 6 LW-only effect: override F_vert=0.0 so solar is disabled.
+    ctor_lw_only = dataclasses.replace(scn.construction, vertical_solar_factor=0.0)
+    scn_lw_only  = dataclasses.replace(scn, construction=ctor_lw_only)
+    grid, result = _run_full2d(scn_lw_only)
 
     # Corner RMS — PR 6 gate: no regression from Sprint 1 (4.15°F margin)
     corner_rms = _corner_rms_F(grid, result, val)

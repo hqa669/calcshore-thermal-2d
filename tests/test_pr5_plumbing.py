@@ -74,41 +74,17 @@ def test_pr5_hydration_result_new_field_populated_by_diag():
 # Test 3: sentinel bit-identity (load-bearing PR 5 test)
 # ============================================================
 
-def test_pr5_sentinel_solar_absorptivity_inert_under_zero_fvert():
-    """Solar absorptivity is still inert when F_vert=0.0 after PR 6.
+def test_pr7_solar_absorptivity_now_affects_output():
+    """After PR 7 (F_vert=0.5 default), solar_absorptivity_side must
+    change side-face solar flux. Inverse of the PR 5/6 sentinel contract.
 
-    PR 6 activates LW on the form face (emissivity-dependent), so emissivity
-    is no longer sentinel-eligible. But solar absorptivity is still gated by
-    F_vert: alpha_sol * F_vert = 0 whenever F_vert=0.0, regardless of alpha.
-    This test guards that invariant — a regression here means PR 7 or later
-    accidentally activated solar without enabling F_vert.
+    PR 5/6 proved the solar path was inert under F_vert=0.0. PR 7 flips the
+    default to 0.5, so the solar term is now live and alpha must matter.
     """
     scn = _load_mix01()
-
-    assert scn.construction.vertical_solar_factor == 0.0, (
-        "Sentinel test assumes F_vert=0.0 default — if this changes, the "
-        "invariant (alpha_side*F_vert=0 regardless of absorptivity) breaks."
-    )
-
-    baseline = _run(scn)
-
-    # Only vary solar absorptivity — emissivity now affects LW and is intentionally
-    # physics-coupled in PR 6; changing it SHOULD change T_field_C.
-    sentinel_ctor = dataclasses.replace(
-        scn.construction,
-        solar_absorptivity_side=0.7,    # nonstandard; default is 0.65
-    )
-    sentinel = _run(scn, construction=sentinel_ctor)
-
-    # Bit-identical for solar: alpha * F_vert = 0 so the path is dead.
-    np.testing.assert_array_equal(
-        baseline.T_field_C, sentinel.T_field_C,
-        err_msg="T_field_C differs when only solar_absorptivity_side changes under "
-                "F_vert=0.0 — the solar path is being activated unintentionally.",
-    )
-    np.testing.assert_array_equal(
-        baseline.alpha_field, sentinel.alpha_field,
-        err_msg="alpha_field differs — same bug class.",
-    )
-    assert baseline.peak_T_C == sentinel.peak_T_C
-    assert baseline.peak_T_location == sentinel.peak_T_location
+    r_base = _run(scn)
+    c2 = dataclasses.replace(scn.construction, solar_absorptivity_side=0.7)
+    r_mod = _run(scn, construction=c2)
+    assert not np.array_equal(
+        r_base.q_side_solar_history, r_mod.q_side_solar_history
+    ), "solar_absorptivity_side must affect q_side_solar_history at F_vert=0.5"

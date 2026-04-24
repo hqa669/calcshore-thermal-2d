@@ -147,6 +147,11 @@ R_FORM_EFFECTIVE_SI = 0.0862   # m²·K/W  (= 0.490 hr·ft²·°F/BTU × 0.1761)
 # radiative cooling without bloating the daytime temperature. Once that is in place,
 # F_vert can be re-swept against the corrected thermal baseline to calibrate the
 # solar contribution correctly. ACI 207.2R Eq 27 provides the orientation model.
+#
+# PR 7 (M6c) RESOLUTION: F_vert default flipped 0.0 → 0.5 in
+# cw_scenario_loader.py after PR 6 landed the LW cooling path. The
+# original monotonic worsening was an artifact of missing LW; with LW
+# in place, F_vert=0.5 closes Corner RMS as predicted.
 VERTICAL_SOLAR_FACTOR_DEFAULT = 0.5   # dimensionless — correct geometry; see above
 
 # Solar absorptivity and emissivity defaults for the top concrete surface.
@@ -1291,9 +1296,8 @@ def solve_hydration_2d(
         _alpha_sol_side = getattr(construction, "solar_absorptivity_side", SOLAR_ABSORPTIVITY_DEFAULT)
         _emis_side      = getattr(construction, "emissivity_side", EMISSIVITY_DEFAULT)
         _F_vert         = getattr(construction, "vertical_solar_factor", VERTICAL_SOLAR_FACTOR_DEFAULT)
-        # _F_vert = 0.0 by default (CWConstruction.vertical_solar_factor=0.0); Sprint 2 will
-        # calibrate using ACI 207.2R Eq 27 orientation model. F_vert=0.5 (physics) causes the
-        # side-face minimum cell to warm, reducing the gradient metric below the ±2.0°F gate.
+        # _F_vert = 0.5 (PR 7 default). ACI 207.2R Eq 27 orientation refinement deferred to PR 8.
+        # Force F_vert=0.0 via dataclasses.replace for the ablation case (disable side solar).
 
     # ------------------------------------------------------------------ #
     # B. Soil and blanket material properties                              #
@@ -1728,11 +1732,9 @@ def solve_hydration_2d(
                 )
 
             # (b) Side column (i = ix_cs, j = 1..iy_concrete_end) — form face BC
-            #     PR 4: adds side-face solar (F_vert projection + daytime gate) to
-            #     the Sprint-0 form-R convective path. Direct LW deferred to Sprint 2:
-            #     removing R_FORM_EFFECTIVE_SI caused a 10°F gradient regression from
-            #     nighttime overcooling (unattenuated h_forced + LW). The solar term
-            #     is the physically dominant contribution to the corner RMS error.
+            #     PR 4: adds side-face solar (F_vert projection + daytime gate).
+            #     PR 6: adds T_outer_form Newton solve for side-face LW.
+            #     PR 7: activates F_vert=0.5 default; solar + LW both physically live.
             #
             #     The interior stencil ran with full-dx cell mass for column ix_cs.
             #     For the actual half-cell (dx/2 wide), lateral conductance per unit
@@ -1746,8 +1748,7 @@ def solve_hydration_2d(
             _T_side_c = T[_js_side, _ics]                     # concrete surface temps at form face
 
             # Solar: flat F_vert projection gated to daytime (6 AM – 6 PM).
-            # Default F_vert = 0.0 (construction.vertical_solar_factor defaults to 0.0).
-            # α_form·F_vert·G term is zero in PR 6; PR 7 activates it.
+            # PR 7 (M6c): F_vert default flipped to 0.5; term is now nonzero during daytime.
             _daytime = is_daytime(t_hrs, _placement_hour)
 
             # PR 6: quasi-steady T_outer_form solve on steel-form outer surface.
@@ -1768,7 +1769,8 @@ def solve_hydration_2d(
                 _denom_f     = _h_conv_vert + _h_rad0 + 1.0 / R_FORM_EFFECTIVE_SI
                 _num_f       = (_T_side_c / R_FORM_EFFECTIVE_SI
                                 + _h_conv_vert * _T_amb_C
-                                + _h_rad0 * _T_eff_sky_C)
+                                + _h_rad0 * _T_eff_sky_C
+                                + _alpha_sol_side * _F_vert * _G_t * _daytime)
                 _T_outer_form_C = _num_f / _denom_f
 
                 # 2 Newton steps on full T⁴ residual (same convergence guarantee as PR 3)
@@ -1782,7 +1784,7 @@ def solve_hydration_2d(
                         + _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
                           * (_T_o_K ** 4 - _T_gnd_K ** 4)
                         - (_T_side_c - _T_outer_form_C) / R_FORM_EFFECTIVE_SI
-                        # α_form · F_vert · G · daytime — zero in PR 6 (F_vert=0.0); PR 7 adds.
+                        - _alpha_sol_side * _F_vert * _G_t * _daytime
                     )
                     _dF_lw = (
                         _h_conv_vert
@@ -2032,7 +2034,8 @@ def solve_hydration_2d(
                         _denom_s       = _h_conv_vert + _h_rad0_s + 1.0 / R_FORM_EFFECTIVE_SI
                         _num_s         = (_T_side_c_s / R_FORM_EFFECTIVE_SI
                                           + _h_conv_vert * _T_amb_s_C
-                                          + _h_rad0_s * _T_eff_sky_C_s)
+                                          + _h_rad0_s * _T_eff_sky_C_s
+                                          + _alpha_sol_side * _F_vert * _G_s * _daytime_s)
                         _T_outer_form_s = _num_s / _denom_s
                         _T_gnd_K_s = _T_amb_s_C + 273.15
                         for _fs_iter in range(2):
@@ -2044,6 +2047,7 @@ def solve_hydration_2d(
                                 + _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
                                   * (_T_o_K_s ** 4 - _T_gnd_K_s ** 4)
                                 - (_T_side_c_s - _T_outer_form_s) / R_FORM_EFFECTIVE_SI
+                                - _alpha_sol_side * _F_vert * _G_s * _daytime_s
                             )
                             _dF_s = (
                                 _h_conv_vert

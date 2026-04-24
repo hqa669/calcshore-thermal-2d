@@ -174,9 +174,11 @@ class CWConstruction:
     emissivity_top: float = 0.88           # blanket outer surface emissivity
     solar_absorptivity_side: float = 0.65  # steel form (similar to light concrete)
     emissivity_side: float = 0.88          # steel form emissivity
-    # F_vert = 0.0 disables side solar; Sprint 2 will calibrate using ACI 207.2R Eq 27
-    # (setting F_vert=0.5 in tests verifies the mechanism is in place)
-    vertical_solar_factor: float = 0.0    # F_vert: flat projection factor for vertical face
+    # F_vert = 0.5: physical flat-projection factor for a vertical face under
+    # diffuse-dominated solar loading. PR 7 (M6c) enables this default after
+    # PR 6 landed the LW cooling path as a physical counterweight. ACI 207.2R
+    # Eq 27 orientation refinement deferred to PR 8 (M6d).
+    vertical_solar_factor: float = 0.5    # F_vert: flat projection factor for vertical face
     form_removal_hrs: float = 168.0
     form_color: str = "Red"
     form_type: str = "Steel"
