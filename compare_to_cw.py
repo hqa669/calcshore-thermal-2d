@@ -34,7 +34,7 @@ S1_TOL_PEAK_MAX_F    = 0.5
 S1_TOL_PEAK_GRAD_F   = 1.0
 S1_TOL_FIELD_RMS_F   = 1.0
 S1_TOL_CENTER_RMS_F  = 0.5
-S1_TOL_CORNER_RMS_F  = 3.0   # same as S0 — this is the Sprint 1 headline target
+S1_TOL_CORNER_RMS_F  = 2.0   # Sprint 3 tightened; Sprint 4 multi-climate target
 
 # CW reference values for MIX-01 (docs/coding_passdown_v3.md)
 CW_PEAK_MAX_F    = 129.6
