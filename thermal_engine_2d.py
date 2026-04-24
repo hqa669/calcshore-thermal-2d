@@ -1284,6 +1284,8 @@ def solve_hydration_2d(
         _top_row_is_soil = (grid.material_id[0, :] == 2)
         # M4 side BC: h_side for the form face (PR 4: pure forced convection)
         _h_side = h_side_convective(environment.cw_ave_max_wind_m_s, _r_blanket)
+        # PR 6: pure convective h for the T_outer_form Newton solve (no R_form baked in)
+        _h_conv_vert = h_forced_convection(environment.cw_ave_max_wind_m_s)
         _ix_cs = grid.ix_concrete_start     # column index of concrete form edge
         # PR 4 side-face radiation properties
         _alpha_sol_side = getattr(construction, "solar_absorptivity_side", SOLAR_ABSORPTIVITY_DEFAULT)
@@ -1406,6 +1408,8 @@ def solve_hydration_2d(
             q_side_lw_out        = np.empty((n_samples, _n_side_rows), dtype=np.float64)
             q_side_conv_out      = np.empty((n_samples, _n_side_rows), dtype=np.float64)
             q_side_total_out     = np.empty((n_samples, _n_side_rows), dtype=np.float64)
+            # PR 6: vertical-form T_outer history
+            T_outer_form_out     = np.empty((n_samples, _n_side_rows), dtype=np.float64)
         else:
             q_solar_out          = None
             q_solar_incident_out = None
@@ -1419,6 +1423,7 @@ def solve_hydration_2d(
             q_side_lw_out        = None
             q_side_conv_out      = None
             q_side_total_out     = None
+            T_outer_form_out     = None
     else:
         top_flux_out         = None
         T_amb_out            = None
@@ -1434,6 +1439,7 @@ def solve_hydration_2d(
         q_side_lw_out        = None
         q_side_conv_out      = None
         q_side_total_out     = None
+        T_outer_form_out     = None
 
     # ------------------------------------------------------------------ #
     # H. Initial conditions                                                #
@@ -1463,6 +1469,7 @@ def solve_hydration_2d(
             q_side_lw_out[0]        = np.zeros(_n_side_rows)
             q_side_conv_out[0]      = np.zeros(_n_side_rows)
             q_side_total_out[0]     = np.zeros(_n_side_rows)
+            T_outer_form_out[0]     = T[1:grid.iy_concrete_end, _ix_cs].copy()  # initial T_outer ≈ T_conc
     next_idx = 1
 
     n_steps = 0
@@ -1740,16 +1747,59 @@ def solve_hydration_2d(
 
             # Solar: flat F_vert projection gated to daytime (6 AM – 6 PM).
             # Default F_vert = 0.0 (construction.vertical_solar_factor defaults to 0.0).
-            # Setting F_vert = 0.5 (physical) in tests verifies the mechanism; full
-            # calibration deferred to Sprint 2 with ACI 207.2R Eq 27 orientation model.
-            # LW on side also deferred to Sprint 2.
-            _daytime     = is_daytime(t_hrs, _placement_hour)
-            _q_sw_side   = -_alpha_sol_side * _F_vert * _G_t * _daytime
+            # α_form·F_vert·G term is zero in PR 6; PR 7 activates it.
+            _daytime = is_daytime(t_hrs, _placement_hour)
 
-            # Convection: calibrated form-R path (R_FORM_EFFECTIVE_SI ≈ 0.0862 m²·K/W)
-            _q_conv_side = _h_side * (_T_side_c - _T_amb_C)
+            # PR 6: quasi-steady T_outer_form solve on steel-form outer surface.
+            # Mirrors the top-BC T_outer pattern (PR 3, lines ~1641-1691).
+            # h_conv_vert: pure forced convection (no R_form baked in).
+            # R_FORM_EFFECTIVE_SI: form + contact-film resistance (calibrated 0.0862 m²·K/W).
+            # F_SKY_VERT=0.5: view factor vertical face → sky.
+            # T_ground = T_amb (Sprint 3 Barber model will upgrade).
+            _T_sky_arr = getattr(environment, "T_sky_C", None)
+            if _T_sky_arr is not None and len(_T_sky_arr) > 0 and _env_hours is not None:
+                _T_sky_C_t = float(np.interp(t_hrs, _env_hours, _T_sky_arr))
+                _T_sky_K   = _T_sky_C_t + 273.15
 
-            _q_side_total = _q_conv_side + _q_sw_side   # positive = heat out
+                # Linearized initial guess using a sky/ground blended reference temp
+                _T_eff_sky_C = F_SKY_VERT * _T_sky_C_t + (1.0 - F_SKY_VERT) * _T_amb_C
+                _T_ref_K     = 0.5 * (_T_side_c + _T_eff_sky_C) + 273.15
+                _h_rad0      = 4.0 * _emis_side * STEFAN_BOLTZMANN * _T_ref_K ** 3
+                _denom_f     = _h_conv_vert + _h_rad0 + 1.0 / R_FORM_EFFECTIVE_SI
+                _num_f       = (_T_side_c / R_FORM_EFFECTIVE_SI
+                                + _h_conv_vert * _T_amb_C
+                                + _h_rad0 * _T_eff_sky_C)
+                _T_outer_form_C = _num_f / _denom_f
+
+                # 2 Newton steps on full T⁴ residual (same convergence guarantee as PR 3)
+                for _f_iter in range(2):
+                    _T_o_K   = _T_outer_form_C + 273.15
+                    _T_gnd_K = _T_amb_C + 273.15   # T_ground = T_amb (PR 6 baseline)
+                    _F_lw = (
+                        _h_conv_vert * (_T_outer_form_C - _T_amb_C)
+                        + _emis_side * STEFAN_BOLTZMANN * F_SKY_VERT
+                          * (_T_o_K ** 4 - _T_sky_K ** 4)
+                        + _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
+                          * (_T_o_K ** 4 - _T_gnd_K ** 4)
+                        - (_T_side_c - _T_outer_form_C) / R_FORM_EFFECTIVE_SI
+                        # α_form · F_vert · G · daytime — zero in PR 6 (F_vert=0.0); PR 7 adds.
+                    )
+                    _dF_lw = (
+                        _h_conv_vert
+                        + 4.0 * _emis_side * STEFAN_BOLTZMANN * F_SKY_VERT
+                          * _T_o_K ** 3
+                        + 4.0 * _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN
+                          * (1.0 - F_SKY_VERT) * _T_o_K ** 3
+                        + 1.0 / R_FORM_EFFECTIVE_SI
+                    )
+                    _T_outer_form_C = _T_outer_form_C - _F_lw / _dF_lw
+
+                # Heat flux positive = OUT of concrete (T_conc > T_outer means heat leaves)
+                _q_side_total = -(_T_outer_form_C - _T_side_c) / R_FORM_EFFECTIVE_SI
+            else:
+                # No sky data: T_outer ≈ T_conc, LW path off
+                _T_outer_form_C = _T_side_c.copy()
+                _q_side_total   = _h_conv_vert * (_T_side_c - _T_amb_C)
 
             _kxp_side  = k_x_face[_js_side, _ics]
             _lat_extra = _kxp_side * (T[_js_side, _ics + 1] - T[_js_side, _ics]) * inv_dxsq
@@ -1811,11 +1861,14 @@ def solve_hydration_2d(
                     t_hrs, float(_T_c), _T_amb_C, _RH_frac, _wind_eff
                 )
 
-            # Corner side face: conv (form-R path) + solar (daytime, same F_vert as main side BC).
-            # LW deferred to Sprint 2.
-            _q_s_conv  = _h_side * (_T_c - _T_amb_C)
-            _q_s_solar = -_alpha_sol_side * _F_vert * _G_t * _daytime
-            _q_s       = _q_s_conv + _q_s_solar
+            # Corner side face: reuse T_outer_form_C[0] from the main side-BC Newton solve
+            # (row 0 of _js_side = j=iy_concrete_start = corner cell). Mirrors how the top
+            # corner reuses _T_outer_C[_ic] at line 1806. PR 7 activates solar term.
+            if _T_sky_arr is not None and len(_T_sky_arr) > 0 and _env_hours is not None:
+                _T_outer_form_corner_C = float(_T_outer_form_C[0])
+                _q_s = -(_T_outer_form_corner_C - _T_c) / R_FORM_EFFECTIVE_SI
+            else:
+                _q_s = _h_conv_vert * (_T_c - _T_amb_C)
 
             # Quarter-cell area (per unit depth) for mass and volumetric source
             _cell_A = _dx_q * _dy_q
@@ -1959,22 +2012,65 @@ def solve_hydration_2d(
                         q_lw_out[next_idx]          = np.zeros(nx)
                         q_lw_incident_out[next_idx] = np.zeros(nx)
                         T_outer_out[next_idx]       = np.zeros(nx)
-                    # PR 4: side-face LW deferred to Sprint 2 (LW not applied to side BC)
-                    q_side_lw_out[next_idx] = np.zeros(_n_side_rows)
-
                     # PR 4: top-face total (sum of all 4 components)
                     q_top_total_out[next_idx] = (
                         q_conv_out[next_idx] + q_evap_out[next_idx]
                         + q_solar_out[next_idx] + q_lw_out[next_idx]
                     )
 
-                    # PR 4: side-face conv and solar at sample time (no sky data needed)
-                    _T_side_c_s   = T[1:grid.iy_concrete_end, _ix_cs]
-                    _daytime_s    = is_daytime(_t_s_hr, _placement_hour)
+                    # PR 6: side-face Newton re-solve at sample time (mirrors top-BC
+                    # sample-time recompute at lines ~1929-1961 for T_outer_C_history).
+                    _T_side_c_s  = T[1:grid.iy_concrete_end, _ix_cs]
+                    _daytime_s   = is_daytime(_t_s_hr, _placement_hour)
+                    _T_sky_arr_s = getattr(environment, "T_sky_C", None)
+                    if _T_sky_arr_s is not None and len(_T_sky_arr_s) > 0 and _hrs is not None:
+                        _T_sky_C_s     = float(np.interp(_t_s_hr, _hrs, _T_sky_arr_s))
+                        _T_sky_K_s     = _T_sky_C_s + 273.15
+                        _T_eff_sky_C_s = F_SKY_VERT * _T_sky_C_s + (1.0 - F_SKY_VERT) * _T_amb_s_C
+                        _T_ref_K_s     = 0.5 * (_T_side_c_s + _T_eff_sky_C_s) + 273.15
+                        _h_rad0_s      = 4.0 * _emis_side * STEFAN_BOLTZMANN * _T_ref_K_s ** 3
+                        _denom_s       = _h_conv_vert + _h_rad0_s + 1.0 / R_FORM_EFFECTIVE_SI
+                        _num_s         = (_T_side_c_s / R_FORM_EFFECTIVE_SI
+                                          + _h_conv_vert * _T_amb_s_C
+                                          + _h_rad0_s * _T_eff_sky_C_s)
+                        _T_outer_form_s = _num_s / _denom_s
+                        _T_gnd_K_s = _T_amb_s_C + 273.15
+                        for _fs_iter in range(2):
+                            _T_o_K_s = _T_outer_form_s + 273.15
+                            _F_s = (
+                                _h_conv_vert * (_T_outer_form_s - _T_amb_s_C)
+                                + _emis_side * STEFAN_BOLTZMANN * F_SKY_VERT
+                                  * (_T_o_K_s ** 4 - _T_sky_K_s ** 4)
+                                + _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
+                                  * (_T_o_K_s ** 4 - _T_gnd_K_s ** 4)
+                                - (_T_side_c_s - _T_outer_form_s) / R_FORM_EFFECTIVE_SI
+                            )
+                            _dF_s = (
+                                _h_conv_vert
+                                + 4.0 * _emis_side * STEFAN_BOLTZMANN * F_SKY_VERT
+                                  * _T_o_K_s ** 3
+                                + 4.0 * _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN
+                                  * (1.0 - F_SKY_VERT) * _T_o_K_s ** 3
+                                + 1.0 / R_FORM_EFFECTIVE_SI
+                            )
+                            _T_outer_form_s = _T_outer_form_s - _F_s / _dF_s
+                        _T_o_K_s = _T_outer_form_s + 273.15
+                        q_side_lw_out[next_idx] = (
+                            _emis_side * STEFAN_BOLTZMANN * F_SKY_VERT
+                            * (_T_o_K_s ** 4 - _T_sky_K_s ** 4)
+                            + _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
+                            * (_T_o_K_s ** 4 - _T_gnd_K_s ** 4)
+                        )
+                        T_outer_form_out[next_idx] = _T_outer_form_s
+                        q_side_conv_out[next_idx]  = _h_conv_vert * (_T_outer_form_s - _T_amb_s_C)
+                    else:
+                        _T_outer_form_s = _T_side_c_s.copy()
+                        q_side_lw_out[next_idx]    = np.zeros(_n_side_rows)
+                        T_outer_form_out[next_idx] = _T_outer_form_s
+                        q_side_conv_out[next_idx]  = _h_conv_vert * (_T_side_c_s - _T_amb_s_C)
                     q_side_solar_out[next_idx] = np.full(
                         _n_side_rows, -_alpha_sol_side * _F_vert * _G_s * _daytime_s
                     )
-                    q_side_conv_out[next_idx]  = _h_side * (_T_side_c_s - _T_amb_s_C)
                     q_side_total_out[next_idx] = (
                         q_side_conv_out[next_idx]
                         + q_side_lw_out[next_idx]
@@ -2015,4 +2111,5 @@ def solve_hydration_2d(
         q_side_LW_history=q_side_lw_out,
         q_side_conv_history=q_side_conv_out,
         q_side_total_history=q_side_total_out,
+        T_outer_form_C_history=T_outer_form_out,
     )

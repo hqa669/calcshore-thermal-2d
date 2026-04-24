@@ -54,29 +54,34 @@ def test_pr5_constants_declared():
 
 
 # ============================================================
-# Test 2: new HydrationResult field stays None in all code paths
+# Test 2: T_outer_form_C_history populated by diagnostic mode
+# (PR 5 declared the field; PR 6 activates it)
 # ============================================================
 
-def test_pr5_hydration_result_new_field_default_none():
+def test_pr5_hydration_result_new_field_populated_by_diag():
     scn = _load_mix01()
-    for diag in (True, False):
-        result = _run(scn, diagnostic_outputs=diag)
-        assert result.T_outer_form_C_history is None, (
-            f"T_outer_form_C_history should be None in PR 5 "
-            f"(diagnostic_outputs={diag})"
-        )
+    result_diag = _run(scn, diagnostic_outputs=True)
+    assert result_diag.T_outer_form_C_history is not None, (
+        "T_outer_form_C_history should be populated when diagnostic_outputs=True (PR 6)"
+    )
+    result_no_diag = _run(scn, diagnostic_outputs=False)
+    assert result_no_diag.T_outer_form_C_history is None, (
+        "T_outer_form_C_history should be None when diagnostic_outputs=False"
+    )
 
 
 # ============================================================
 # Test 3: sentinel bit-identity (load-bearing PR 5 test)
 # ============================================================
 
-def test_pr5_sentinel_bit_identical():
-    """Prove Sprint-1 side-face fields are inert under default F_vert=0.0.
+def test_pr5_sentinel_solar_absorptivity_inert_under_zero_fvert():
+    """Solar absorptivity is still inert when F_vert=0.0 after PR 6.
 
-    This is PR 5's load-bearing test. If it fails, the claim 'PR 5 changes
-    nothing' is false, and PR 6's isolation of LW physics from plumbing
-    bugs is compromised. Debug before proceeding to PR 6.
+    PR 6 activates LW on the form face (emissivity-dependent), so emissivity
+    is no longer sentinel-eligible. But solar absorptivity is still gated by
+    F_vert: alpha_sol * F_vert = 0 whenever F_vert=0.0, regardless of alpha.
+    This test guards that invariant — a regression here means PR 7 or later
+    accidentally activated solar without enabling F_vert.
     """
     scn = _load_mix01()
 
@@ -87,23 +92,23 @@ def test_pr5_sentinel_bit_identical():
 
     baseline = _run(scn)
 
+    # Only vary solar absorptivity — emissivity now affects LW and is intentionally
+    # physics-coupled in PR 6; changing it SHOULD change T_field_C.
     sentinel_ctor = dataclasses.replace(
         scn.construction,
-        emissivity_side=0.9,            # nonstandard; default is 0.88
         solar_absorptivity_side=0.7,    # nonstandard; default is 0.65
     )
     sentinel = _run(scn, construction=sentinel_ctor)
 
-    # Bit-identical: no tolerance. If this fails, investigate floating-point
-    # side channels — do NOT paper over with assert_allclose.
+    # Bit-identical for solar: alpha * F_vert = 0 so the path is dead.
     np.testing.assert_array_equal(
         baseline.T_field_C, sentinel.T_field_C,
-        err_msg="T_field_C differs under sentinel side-face fields — "
-                "PR 5 plumbing has accidental coupling under F_vert=0.0.",
+        err_msg="T_field_C differs when only solar_absorptivity_side changes under "
+                "F_vert=0.0 — the solar path is being activated unintentionally.",
     )
     np.testing.assert_array_equal(
         baseline.alpha_field, sentinel.alpha_field,
-        err_msg="alpha_field differs under sentinel — same bug class.",
+        err_msg="alpha_field differs — same bug class.",
     )
     assert baseline.peak_T_C == sentinel.peak_T_C
     assert baseline.peak_T_location == sentinel.peak_T_location
