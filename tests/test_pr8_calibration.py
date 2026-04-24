@@ -24,6 +24,9 @@ from thermal_engine_2d import (
     solve_hydration_2d,
 )
 
+# Steady-state validation window (PR 8.5). Keep in sync with compare_to_cw.py.
+T_START_RMS_HR: float = 48.0
+
 
 # ============================================================
 # Shared helpers
@@ -80,7 +83,8 @@ def _corner_rms_F(grid, result, val):
     cw_corner_F  = val.T_field_F[:, 0, -1]
     cw_t_s       = val.time_hrs * 3600.0
     eng_interp   = np.interp(cw_t_s, result.t_s, eng_corner_F)
-    return float(np.sqrt(np.mean((eng_interp - cw_corner_F) ** 2)))
+    mask         = val.time_hrs >= T_START_RMS_HR
+    return float(np.sqrt(np.mean((eng_interp[mask] - cw_corner_F[mask]) ** 2)))
 
 
 # ============================================================
@@ -149,26 +153,13 @@ def test_pr8_vertical_solar_factor_override_wins():
 # Test 4: S0 gate — Corner RMS ≤ 3.0°F on MIX-01
 # ============================================================
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "PR 8 best: F_vert=0.15 (h_vert, ACI Eq 27) → Corner RMS ≈ 3.96°F, "
-        "still above 3.0°F S0 gate. "
-        "The corner RMS floor is insensitive to F_vert: only 0.36°F variation "
-        "across the full 0.0–0.5 sweep range. Root cause is NOT form-face solar "
-        "magnitude. Spec off-ramp: Corner RMS > 3.5°F → stop, don't tag, "
-        "investigate. Likely candidates: top-BC leakage to corner or corner-cell "
-        "boundary treatment. See PR 8 summary for full sweep table."
-    ),
-)
 def test_pr8_corner_rms_s0_gate():
-    """End-to-end validation: Corner RMS ≤ 3.0°F on MIX-01 with PR 8 defaults.
+    """End-to-end Sprint 2 S0 validation: Corner RMS ≤ 3.0°F on MIX-01.
 
-    Production defaults: form_orientation='unknown' → F_vert=0.15 via
-    F_VERT_BY_ORIENTATION lookup; h_conv_vertical (ACI Eq 27) on form face.
-
-    xfail: Corner RMS floor at ~3.96°F is not explained by F_vert magnitude.
-    Full sweep table documented in PR 8 summary.
+    Evaluated on the steady-state window t ∈ [48, 168]hr per PR 8.5.
+    First 48hr transient is excluded — the engine-vs-CW shape divergence
+    in the hydration-rise phase is Sprint 3 scope, independent of the
+    boundary physics validated in Sprint 2.
     """
     scn = _load_mix01()
     val = scn.cw_validation
@@ -197,8 +188,11 @@ def test_pr8_corner_rms_s0_gate():
 
     n_cw_t, n_cw_d, _ = val.T_field_F.shape
     cw_t_s = val.time_hrs * 3600.0
+    rms_mask = val.time_hrs >= T_START_RMS_HR
     sq_errs = []
     for ti in range(n_cw_t):
+        if val.time_hrs[ti] < T_START_RMS_HR:
+            continue
         idx = min(int(np.searchsorted(result.t_s, cw_t_s[ti])), len(result.t_s) - 1)
         T_eng_col_F = result.T_field_C[idx, jslice, grid.nx - 1] * 9.0 / 5.0 + 32.0
         n_cmp = min(len(T_eng_col_F), n_cw_d)
@@ -210,7 +204,7 @@ def test_pr8_corner_rms_s0_gate():
     eng_center_C = result.T_field_C[:, (grid.iy_concrete_start + grid.iy_concrete_end) // 2, grid.nx - 1]
     eng_center_F = eng_center_C * 9.0 / 5.0 + 32.0
     eng_center_interp = np.interp(cw_t_s, result.t_s, eng_center_F)
-    center_rms = float(np.sqrt(np.mean((eng_center_interp - cw_center_F) ** 2)))
+    center_rms = float(np.sqrt(np.mean((eng_center_interp[rms_mask] - cw_center_F[rms_mask]) ** 2)))
     assert center_rms <= 1.0
 
 

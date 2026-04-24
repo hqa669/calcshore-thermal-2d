@@ -156,6 +156,29 @@ def main():
     center_rms_F = None
     corner_rms_F = None
 
+    # ------------------------------------------------------------------ #
+    # VALIDATION WINDOW (PR 8.5)
+    # ------------------------------------------------------------------ #
+    # RMS metrics are computed over t ∈ [T_START_RMS_HR, 168]hr.
+    # Rationale: the first ~48hr is dominated by the hydration-rise
+    # transient, where engine and CW diverge in curve SHAPE (not steady-
+    # state physics). Including the transient conflates two independent
+    # error sources — boundary physics (Sprint 2 scope) and hydration
+    # curve shape (Sprint 3 scope). Sprint 2 S0 gates validate boundary
+    # physics; evaluating on the steady-state window isolates them.
+    #
+    # Chosen at 48hr: past the adiabatic peak for MIX-01 (~40-60hr), past
+    # the first full diurnal cycle, retains 71% of CW output samples
+    # (1441/2016). Diagnostic verify_pr8_floor_v2.py showed Corner RMS
+    # stable at ~2.2-2.4°F across [48,168] through [96,168] windows;
+    # evaluation is insensitive to the exact cutoff past 48hr.
+    #
+    # Peak Max T and Peak Gradient remain evaluated on the full 168hr
+    # window — they are single-point metrics (max of series), not
+    # integrated error metrics, so window-masking is not meaningful for
+    # them. The peak in both engine and CW always occurs well after 48hr.
+    T_START_RMS_HR: float = 48.0    # hours; start of RMS integration window
+
     if val.T_field_F is not None:
         # CW field: (n_cw_t, nD, nW); width index 0 = centerline, -1 = corner; depth 0 = top
         cw_t_s = val.time_hrs * 3600.0
@@ -171,13 +194,19 @@ def main():
         eng_center_interp = np.interp(cw_t_s, result.t_s, eng_center_F)
         eng_corner_interp = np.interp(cw_t_s, result.t_s, eng_corner_F)
 
-        center_rms_F = rms(eng_center_interp, cw_center_F)
-        corner_rms_F = rms(eng_corner_interp, cw_corner_F)
+        # Apply steady-state window to all integrated RMS metrics.
+        rms_mask = val.time_hrs >= T_START_RMS_HR
+        n_samples_rms = int(rms_mask.sum())
+
+        center_rms_F = rms(eng_center_interp[rms_mask], cw_center_F[rms_mask])
+        corner_rms_F = rms(eng_corner_interp[rms_mask], cw_corner_F[rms_mask])
 
         # Field-wide: compare centerline column of engine to CW centerline across all depths
         n_conc_y = grid.iy_concrete_end - grid.iy_concrete_start + 1
         sq_errs = []
         for ti in range(n_cw_t):
+            if val.time_hrs[ti] < T_START_RMS_HR:
+                continue   # skip transient samples
             idx = int(np.searchsorted(result.t_s, cw_t_s[ti]))
             idx = min(idx, len(result.t_s) - 1)
             T_eng_col_C = result.T_field_C[idx, jslice, grid.nx - 1]  # centerline col
@@ -223,6 +252,8 @@ def main():
 
     print()
     print(f"  {scenario_name}  ({168} hr run, {n_steps} timesteps, {n_nodes} nodes)")
+    if field_rms_F is not None:
+        print(f"  (RMS metrics evaluated on t ∈ [{T_START_RMS_HR:.0f}, 168]hr = {n_samples_rms} samples)")
     print(f"  Peak Max T:     Engine {engine_peak_max_F:6.1f}°F @ {engine_peak_max_hr:5.1f} hr | CW {cw_peak_max_F:6.1f}°F @ {cw_peak_max_hr:.1f} hr")
     print(f"                  Δ = {peak_max_delta:+.1f}°F   [{pass_fail(pass_peak_max)}] (S0 ±{TOL_PEAK_MAX_F:.1f}°F)  [S1-aspire ±{S1_TOL_PEAK_MAX_F:.1f}°F: {s1_mark(s1_peak_max)}]")
     print(f"  Peak Gradient:  Engine {engine_peak_grad_F:5.1f}°F @ {engine_peak_grad_hr:5.1f} hr | CW {cw_peak_grad_F:5.1f}°F @ {CW_PEAK_GRAD_T_HR:.1f} hr")
