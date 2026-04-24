@@ -565,6 +565,57 @@ def ambient_temp_F(t_hrs: float, env, placement_hour: int) -> float:
     return avg + amp * np.cos(2 * np.pi * (h - 15.0) / 24.0)
 
 
+def ground_surface_temperature_C(
+    t_hrs: float,
+    environment,
+    soil_lag_hrs: float,
+    soil_damping: float,
+    placement_hour: int,
+) -> float:
+    """Barber-style ground surface temperature.
+
+    Reference: §2.3.1 of docs/coding_passdown_v4.md.
+
+    Model: the undisturbed (deep) reference temperature is approximated by the
+    full-array mean of ambient air temperature — valid when the analysis window
+    spans whole diurnal cycles (true for MIX-01's 7-day window; revisit if
+    shorter analyses arrive). The surface oscillates about that reference with a
+    lag `soil_lag_hrs` and amplitude factor `soil_damping`.
+
+    Early-time behavior: `t_hrs - soil_lag_hrs` is clamped at 0, which matches
+    the CW convention of holding T_amb flat before placement.
+
+    Identity: with `soil_lag_hrs=0.0, soil_damping=1.0` this function returns
+    exactly `(ambient_temp_F(t_hrs, environment, placement_hour) - 32) * 5/9`
+    at every t. That identity is the regression oracle for the PR 10 plumbing
+    tests; PR 11 activates the model by wiring this into the form-face residual.
+
+    Parameters
+    ----------
+    t_hrs : float
+        Time since concrete placement, hours.
+    environment : CWEnvironment
+        Must have `hours` and `T_air_F` arrays (production path).
+    soil_lag_hrs : float
+        Phase lag applied to the ambient signal before damping, hours.
+    soil_damping : float
+        Amplitude damping factor in [0, 1]. 1.0 = undamped surface.
+    placement_hour : int
+        Accepted for signature parity with `ambient_temp_F`; unused here
+        because the hourly array already encodes absolute time.
+
+    Returns
+    -------
+    float
+        Ground surface temperature, °C.
+    """
+    T_amb_daily_mean_C = float(np.mean((environment.T_air_F - 32.0) * 5.0 / 9.0))
+    t_lagged_hrs = max(t_hrs - soil_lag_hrs, 0.0)
+    T_amb_lagged_F = float(np.interp(t_lagged_hrs, environment.hours, environment.T_air_F))
+    T_amb_lagged_C = (T_amb_lagged_F - 32.0) * 5.0 / 9.0
+    return T_amb_daily_mean_C + soil_damping * (T_amb_lagged_C - T_amb_daily_mean_C)
+
+
 def is_daytime(t_hrs: float, placement_hour: int) -> float:
     """Binary daytime indicator for side-face solar gating.
 
@@ -648,6 +699,7 @@ class HydrationResult:
     # M3 diagnostic fields — None when boundary_mode is 'adiabatic' or 'dirichlet'
     top_flux_W_m2_history: np.ndarray | None = None  # shape (n_out, nx) surface heat loss
     T_amb_C_history: np.ndarray | None = None        # shape (n_out,) ambient air temperature
+    T_ground_C_history: np.ndarray | None = None    # shape (n_out,) ground surface temp (PR 11)
     # PR 2 solar diagnostics — both None when diagnostic_outputs=False or non-full_2d mode.
     # q_solar_history         : flux that ENTERS the concrete after blanket attenuation
     #                           = −α·G·f  where f = h_top_combined/h_forced_convection ≈ 0.047

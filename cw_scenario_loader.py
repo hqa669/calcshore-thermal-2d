@@ -192,6 +192,12 @@ class CWConstruction:
     soil_temp_F: float = 80.0
     footing_subbase: str = "Limestone"
 
+    # Sprint 3 / Barber soil model (§2.3.1 coding_passdown_v4.md).
+    # PR 10 is plumbing-only: these defaults have no effect on the engine until
+    # PR 11 wires ground_surface_temperature_C() into the form-face Newton residual.
+    soil_lag_hrs: float = 5.0
+    soil_damping: float = 0.7
+
 
 @dataclass
 class CWEnvironment:
