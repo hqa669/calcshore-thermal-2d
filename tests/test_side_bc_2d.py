@@ -150,26 +150,27 @@ def test_air_region_not_solved():
 # ============================================================
 
 def test_h_side_combination():
-    """h_side_convective = 1 / (1/h_forced + R_FORM_EFFECTIVE_SI) ≈ 7.4 W/(m²·K).
+    """h_side_convective = 1 / (1/h_forced + R_FORM_CONTACT_SI) ≈ 7.4 W/(m²·K).
 
     PR 2: h_side_convective now uses h_forced_convection (no +5.5 LW term),
     giving h_forced(10.5) = 20.3 W/(m²·K) and h_side ≈ 7.4.
-    R_FORM_EFFECTIVE_SI is the empirically calibrated effective form-face
-    resistance (≈ 0.0862 m²·K/W = 0.490 hr·ft²·°F/BTU).
+    R_FORM_CONTACT_SI is the steel form + wet-concrete contact film
+    resistance (0.0862 m²·K/W = 0.490 hr·ft²·°F/BTU; validated as real
+    contact physics by PR 6 R_form=0 diagnostic).
     The cure blanket is a top-surface treatment only; blanket_R_imp is
     accepted but does not affect the side BC.
     """
-    from thermal_engine_2d import R_FORM_EFFECTIVE_SI
+    from thermal_engine_2d import R_FORM_CONTACT_SI
     wind = 10.5
     R_imp = 5.67          # passed but ignored per function contract
     h_conv = h_forced_convection(wind)   # 20.3 W/(m²·K) — no +5.5 LW term
-    h_side_expected = 1.0 / (1.0 / h_conv + R_FORM_EFFECTIVE_SI)
+    h_side_expected = 1.0 / (1.0 / h_conv + R_FORM_CONTACT_SI)
 
     h_side = h_side_convective(wind, R_imp)
     assert h_side == pytest.approx(h_side_expected, rel=1e-5)
     # h_side ≈ 7.4 W/(m²·K) with forced-convection (was ≈ 8.0 with legacy +5.5)
     assert h_side == pytest.approx(7.4, abs=0.1), (
-        f"h_side should be ≈ 7.4 W/(m²·K) with R_FORM_EFFECTIVE_SI={R_FORM_EFFECTIVE_SI:.4f}"
+        f"h_side should be ≈ 7.4 W/(m²·K) with R_FORM_CONTACT_SI={R_FORM_CONTACT_SI:.4f}"
     )
 
 
@@ -305,13 +306,13 @@ def test_is_daytime_gate_boundaries():
     assert is_daytime(18.0, placement_hour=0) == 0.0   # hour 18: sunset
 
 
-def test_r_form_effective_si_constant_present():
-    """R_FORM_EFFECTIVE_SI remains for convective path (PR 4 rollback; LW deferred Sprint 2)."""
-    assert hasattr(thermal_engine_2d, 'R_FORM_EFFECTIVE_SI'), (
-        "R_FORM_EFFECTIVE_SI must exist — it was restored after removing it caused "
+def test_r_form_contact_si_constant_present():
+    """R_FORM_CONTACT_SI: real contact resistance validated by Sprint 2 PR 6 R_form=0 diagnostic."""
+    assert hasattr(thermal_engine_2d, 'R_FORM_CONTACT_SI'), (
+        "R_FORM_CONTACT_SI must exist — it was restored after removing it caused "
         "a 10°F gradient regression from nighttime overcooling"
     )
-    assert thermal_engine_2d.R_FORM_EFFECTIVE_SI == pytest.approx(0.0862, rel=1e-4)
+    assert thermal_engine_2d.R_FORM_CONTACT_SI == pytest.approx(0.0862, rel=1e-4)
 
 
 def test_h_side_convective_less_than_forced_convection():

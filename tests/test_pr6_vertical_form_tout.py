@@ -17,7 +17,7 @@ from thermal_engine_2d import (
     EMIS_GROUND,
     EMISSIVITY_DEFAULT,
     F_SKY_VERT,
-    R_FORM_EFFECTIVE_SI,
+    R_FORM_CONTACT_SI,
     SOLAR_ABSORPTIVITY_DEFAULT,
     STEFAN_BOLTZMANN,
     build_grid_half_mat,
@@ -106,8 +106,8 @@ def test_pr6_newton_convergence():
         T_eff_sky_C = F_SKY_VERT * T_sky_C + (1.0 - F_SKY_VERT) * T_amb_C
         T_ref_K  = 0.5 * (T_conc_C + T_eff_sky_C) + 273.15
         h_rad0   = 4.0 * EMISSIVITY_DEFAULT * STEFAN_BOLTZMANN * T_ref_K ** 3
-        denom    = h_conv + h_rad0 + 1.0 / R_FORM_EFFECTIVE_SI
-        num      = (T_conc_C / R_FORM_EFFECTIVE_SI
+        denom    = h_conv + h_rad0 + 1.0 / R_FORM_CONTACT_SI
+        num      = (T_conc_C / R_FORM_CONTACT_SI
                     + h_conv * T_amb_C
                     + h_rad0 * T_eff_sky_C)
         T_o = num / denom
@@ -119,12 +119,12 @@ def test_pr6_newton_convergence():
                     * (T_o_K ** 4 - T_sky_K ** 4)
                   + EMISSIVITY_DEFAULT * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
                     * (T_o_K ** 4 - T_gnd_K ** 4)
-                  - (T_conc_C - T_o) / R_FORM_EFFECTIVE_SI)
+                  - (T_conc_C - T_o) / R_FORM_CONTACT_SI)
             dF = (h_conv
                   + 4.0 * EMISSIVITY_DEFAULT * STEFAN_BOLTZMANN * F_SKY_VERT * T_o_K ** 3
                   + 4.0 * EMISSIVITY_DEFAULT * EMIS_GROUND * STEFAN_BOLTZMANN
                     * (1.0 - F_SKY_VERT) * T_o_K ** 3
-                  + 1.0 / R_FORM_EFFECTIVE_SI)
+                  + 1.0 / R_FORM_CONTACT_SI)
             T_o -= F / dF
         return T_o
 
@@ -296,7 +296,7 @@ def test_pr6_r_form_zero_diagnostic(monkeypatch, capsys):
     grid, result_a = _run_full2d(scn)
     rms_a = _corner_rms_F(grid, result_a, scn.cw_validation)
 
-    monkeypatch.setattr(te, "R_FORM_EFFECTIVE_SI", 1e-9)
+    monkeypatch.setattr(te, "R_FORM_CONTACT_SI", 1e-9)
     _, result_b = _run_full2d(scn)
     rms_b = _corner_rms_F(grid, result_b, scn.cw_validation)
 

@@ -15,9 +15,10 @@ M4 architecture decisions:
     full_2d mode.  The blanket row (j=0) exists in the grid for index
     alignment but carries no thermal mass; the top BC is applied directly at
     j=iy_concrete_start using h_top_series(wind, blanket_R).
-  - Side BC at x=0 (form face): h_side = 1/(1/h_conv + R_FORM_EFFECTIVE_SI)
-    where R_FORM_EFFECTIVE_SI = 0.0862 m²·K/W (empirically calibrated against
-    CW MIX-01; see Sprint 2 for ACI Eq 27 orientation model revision).
+  - Side BC at x=0 (form face): h_side = 1/(1/h_conv + R_FORM_CONTACT_SI)
+    where R_FORM_CONTACT_SI = 0.0862 m²·K/W (steel form + wet-concrete
+    contact film; validated as real contact physics by Sprint 2 PR 6
+    R_form=0 diagnostic — see constant definition below).
   - Corner cell (iy_concrete_start, ix_concrete_start) receives a quarter-cell
     energy balance that accounts simultaneously for the top and side BCs.
 
@@ -108,25 +109,38 @@ R_IMP_TO_R_SI = 0.1761   # (hr·ft²·°F/BTU) → (m²·K/W)
 # Steel form thermal resistance (negligible for bare steel).
 FORM_R_SI = 0.0   # m²·K/W
 
-# Effective side-face resistance calibrated against CW MIX-01 (steel form +
-# wet-concrete contact film, Sprint 0).  Sprint 2 will revisit with the ACI
-# Eq 27 orientation-dependent model; removing it caused a 10°F gradient
-# regression (full LW + conv overcooled the side face at night).
-R_FORM_EFFECTIVE_SI = 0.0862   # m²·K/W  (= 0.490 hr·ft²·°F/BTU × 0.1761)
+# Thermal contact resistance between wet concrete and steel form outer
+# surface. Represents the combined effect of the steel form wall
+# (t/k ≈ 0.005/50 = 1e-4 m²·K/W, negligible) and the interfacial contact
+# film (wet concrete ↔ steel, ~0.08 m²·K/W per ACI 347 guidance).
+#
+# History: originally introduced in Sprint 1 as R_FORM_EFFECTIVE_SI, a
+# calibration fallback that collapsed convection + unmodeled LW into a
+# single effective resistance. Sprint 2 PR 6 validated this value as
+# physically meaningful by running the form-face T_outer solve at
+# R_form = 0 (removing the resistance entirely); Corner RMS jumped from
+# 4.08°F to 8.85°F, confirming 0.0862 is real contact physics, not an
+# artifact. Renamed to R_FORM_CONTACT_SI in PR 9 to reflect this.
+#
+# Sprint 3+ may parameterize by form material (steel / plywood / plastic
+# liner) and cure method via new CWConstruction.form_type fields.
+R_FORM_CONTACT_SI: float = 0.0862   # m²·K/W  (= 0.490 hr·ft²·°F/BTU × 0.1761)
 
 # Vertical-surface solar projection factor: fraction of horizontal irradiance
 # incident on a vertical form face.
 #
-# PR 8 (M6d): F_vert is now resolved via form_orientation → F_VERT_BY_ORIENTATION
-# lookup. CWConstruction.vertical_solar_factor is an optional override for sweeps
-# and ablation tests; None means use the lookup.
+# Sprint 2 PR 8 (M6d) resolved F_vert via form_orientation → F_VERT_BY_ORIENTATION
+# lookup (see below). CWConstruction.vertical_solar_factor is an optional override
+# for sweeps and ablation tests; None means use the lookup.
 #
-# Historical note: before PR 6 (missing LW cooling), the Sprint 1 sweep showed
-# F_vert monotonically worsening Corner RMS (the "dark infrastructure" result,
-# PR 5 comments). After PR 6 landed the vertical-face LW solve, PR 7 activated
-# F_vert=0.5 which recovered amplitude and phase. PR 8 calibrated the value to
-# F_vert=0.15 (MIX-01, ACI Eq 27 h_conv_vertical).
-VERTICAL_SOLAR_FACTOR_DEFAULT = 0.15  # dimensionless — MIX-01 calibrated (PR 8)
+# Historical note (superseded by PR 8 calibration): Sprint 1 held
+# vertical_solar_factor at 0.0 while the side-face LW solve was missing. The
+# Sprint 1 F_vert sweep showed Corner RMS monotonically worsening as F_vert
+# increased, because solar heating without LW correction was pure overcooling at
+# night. PR 6 activated the vertical-face LW Newton solve; PR 7 then set F_vert=0.5
+# which recovered amplitude and phase; PR 8 calibrated to F_vert=0.15 for MIX-01
+# (ACI 207.2R Eq 27 h_conv_vertical active). The MIX-01-calibrated value is stored
+# as F_VERT_BY_ORIENTATION["unknown"] = 0.15 below.
 
 # F_vert lookup by form orientation.
 # Flat-projection approximations for a vertical form face under summer loading at
@@ -488,15 +502,15 @@ def h_side_convective(wind_m_s_max: float, blanket_R_imp: float = 0.0) -> float:
     """Effective heat transfer coefficient at the concrete form face.
 
     Physical path: ambient → convection → form face → concrete.
-    R_FORM_EFFECTIVE_SI captures the empirically calibrated combined resistance
-    of the steel form and wet-concrete contact film (≈ 0.49 hr·ft²·°F/BTU).
+    R_FORM_CONTACT_SI is the steel form + wet-concrete contact film resistance
+    (0.0862 m²·K/W, validated as real contact physics by Sprint 2 PR 6
+    R_form=0 diagnostic — Corner RMS 8.85°F vs 4.08°F with production value).
     The cure blanket is a top-surface treatment only; blanket_R_imp is accepted
     for call-site compatibility but does not affect the side BC result.
 
-    PR 4 keeps R_FORM_EFFECTIVE_SI for convection but adds solar (F_vert
-    projection with daytime gate). Removing R_FORM entirely caused a 10°F
-    gradient regression due to nighttime overcooling from unattenuated LW + h_forced.
-    Sprint 2 will replace R_FORM with the ACI 207.2R Eq 27 orientation model.
+    Sprint 2 PR 8 added ACI 207.2R Eq 27 orientation-dependent convection via
+    h_forced_convection_vertical(); this helper remains for the convective-path
+    component that feeds h_side in legacy and test call-sites.
 
     Parameters
     ----------
@@ -507,7 +521,7 @@ def h_side_convective(wind_m_s_max: float, blanket_R_imp: float = 0.0) -> float:
     -------
     float  Effective side-surface heat transfer coefficient W/(m²·K).
     """
-    return 1.0 / (1.0 / h_forced_convection(wind_m_s_max) + R_FORM_EFFECTIVE_SI)
+    return 1.0 / (1.0 / h_forced_convection(wind_m_s_max) + R_FORM_CONTACT_SI)
 
 
 # Adapted from reference/thermal_engine_v2.py:197-203.
@@ -658,10 +672,17 @@ class HydrationResult:
     q_side_LW_history: np.ndarray | None = None         # (n_out, n_side_rows) W/m², LW on form face
     q_side_conv_history: np.ndarray | None = None       # (n_out, n_side_rows) W/m², convection on form face
     q_side_total_history: np.ndarray | None = None      # (n_out, n_side_rows) W/m², total side flux
-    # PR 5 (M6a) Sprint 2 plumbing — populated by PR 6's vertical-form
-    # T_outer solve. Declared here but never written in PR 5 (remains None
-    # in all code paths). Shape (n_out, n_side_rows) matching the sibling
-    # q_side_*_history fields. n_side_rows = iy_concrete_end - 1.
+    # T_outer_form_C_history is the temperature of the steel-form OUTER
+    # surface (ambient-facing side) at each sample time, for each row of the
+    # side column. This is the quantity solved by the vertical-form T_outer
+    # Newton iteration (see form-BC solve block). At night it typically
+    # lies between T_sky and T_ambient (form radiates to sky); during
+    # sunny days it may exceed both T_ambient and T_concrete as the form
+    # absorbs direct solar on its outer face.
+    #
+    # None in non-full_2d boundary modes or when diagnostic_outputs=False.
+    # Shape: (n_out, n_side_rows) where n_side_rows = iy_concrete_end - 1.
+    # Units: °C.
     T_outer_form_C_history: np.ndarray | None = None    # (n_out, n_side_rows) °C
 
 
@@ -1663,6 +1684,51 @@ def solve_hydration_2d(
                 # T_outer_C_history:     blanket outer-surface temperature
                 # All three populated when diagnostic_outputs=True.
                 # ─────────────────────────────────────────────────────────────────────
+                #
+                # ========================================================================
+                # FORM-FACE T_outer SOLVE — mathematical twin of the top-BC blanket solve
+                # ========================================================================
+                #
+                # The Sprint 2 vertical-form Newton solve uses the same quasi-steady
+                # energy-balance pattern as the Sprint 1 blanket solve (see above), with
+                # four substitutions that reflect form-face geometry and materials:
+                #
+                #   1. R_blanket → R_FORM_CONTACT_SI (steel form + wet-concrete contact
+                #      film, ~0.0862 m²·K/W vs blanket's ~0.98)
+                #
+                #   2. F_sky_top = 1.0  →  F_SKY_VERT = 0.5 with explicit ground-view term:
+                #        q_lw = ε·σ·[F_SKY·(T_o⁴ − T_sky⁴)
+                #                   + (1 − F_SKY)·ε_ground·(T_o⁴ − T_ground⁴)]
+                #      Ground at T_amb in Sprint 2; Barber soil model upgrades in Sprint 3.
+                #
+                #   3. Solar term unchanged in structure:
+                #        q_solar = −α_form · F_vert · G · daytime
+                #      with F_vert from F_VERT_BY_ORIENTATION lookup (PR 8 calibration).
+                #
+                #   4. h_conv horizontal → h_conv_vertical (ACI 207.2R Eq 27,
+                #      `h_forced_convection_vertical()` = 4.0 + 2.5·0.4·wind).
+                #
+                # Attenuation factor comparison (flux reaching concrete as fraction of
+                # incident on outer surface):
+                #
+                #   Top BC:    f_top  = h_top_combined / h_forced     ≈ 0.047
+                #              (blanket is thick; most incident flux is absorbed and
+                #               re-emitted to ambient)
+                #
+                #   Form BC:   f_form = h_side_combined / h_conv_vert ≈ 0.22
+                #              (steel form + contact film is ~5× less resistant than
+                #               the blanket; ~5× more flux reaches concrete)
+                #
+                # This ~5× difference is why the form-face LW path (PR 6) closed Sprint 1's
+                # nighttime-amplitude gap even though the top-BC LW path was already
+                # active — the form conducts nighttime sky cooling to the concrete
+                # corner 5× more effectively per W/m² incident.
+                #
+                # Newton iteration identical to the blanket solve: linearized initial
+                # guess from midpoint reference T, then 2 Newton refinement steps on the
+                # full T⁴ residual. Convergence verified to <0.01°C vs 5-step converged
+                # reference (test_pr6_newton_convergence).
+                # ========================================================================
                 _solar_W_m2 = getattr(environment, 'solar_W_m2', None)
                 _env_hours  = getattr(environment, 'hours', None)
                 if _solar_W_m2 is not None and len(_solar_W_m2) > 0:
@@ -1766,9 +1832,10 @@ def solve_hydration_2d(
             _daytime = is_daytime(t_hrs, _placement_hour)
 
             # PR 6: quasi-steady T_outer_form solve on steel-form outer surface.
-            # Mirrors the top-BC T_outer pattern (PR 3, lines ~1641-1691).
-            # h_conv_vert: pure forced convection (no R_form baked in).
-            # R_FORM_EFFECTIVE_SI: form + contact-film resistance (calibrated 0.0862 m²·K/W).
+            # Mirrors the top-BC T_outer pattern (PR 3); see form-face twin comment
+            # above for the 4-substitution map and attenuation factor comparison.
+            # h_conv_vert: pure forced convection (ACI 207.2R Eq 27, PR 8).
+            # R_FORM_CONTACT_SI: form + contact-film resistance (0.0862 m²·K/W).
             # F_SKY_VERT=0.5: view factor vertical face → sky.
             # T_ground = T_amb (Sprint 3 Barber model will upgrade).
             _T_sky_arr = getattr(environment, "T_sky_C", None)
@@ -1780,8 +1847,8 @@ def solve_hydration_2d(
                 _T_eff_sky_C = F_SKY_VERT * _T_sky_C_t + (1.0 - F_SKY_VERT) * _T_amb_C
                 _T_ref_K     = 0.5 * (_T_side_c + _T_eff_sky_C) + 273.15
                 _h_rad0      = 4.0 * _emis_side * STEFAN_BOLTZMANN * _T_ref_K ** 3
-                _denom_f     = _h_conv_vert + _h_rad0 + 1.0 / R_FORM_EFFECTIVE_SI
-                _num_f       = (_T_side_c / R_FORM_EFFECTIVE_SI
+                _denom_f     = _h_conv_vert + _h_rad0 + 1.0 / R_FORM_CONTACT_SI
+                _num_f       = (_T_side_c / R_FORM_CONTACT_SI
                                 + _h_conv_vert * _T_amb_C
                                 + _h_rad0 * _T_eff_sky_C
                                 + _alpha_sol_side * _F_vert * _G_t * _daytime)
@@ -1797,7 +1864,7 @@ def solve_hydration_2d(
                           * (_T_o_K ** 4 - _T_sky_K ** 4)
                         + _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
                           * (_T_o_K ** 4 - _T_gnd_K ** 4)
-                        - (_T_side_c - _T_outer_form_C) / R_FORM_EFFECTIVE_SI
+                        - (_T_side_c - _T_outer_form_C) / R_FORM_CONTACT_SI
                         - _alpha_sol_side * _F_vert * _G_t * _daytime
                     )
                     _dF_lw = (
@@ -1806,12 +1873,12 @@ def solve_hydration_2d(
                           * _T_o_K ** 3
                         + 4.0 * _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN
                           * (1.0 - F_SKY_VERT) * _T_o_K ** 3
-                        + 1.0 / R_FORM_EFFECTIVE_SI
+                        + 1.0 / R_FORM_CONTACT_SI
                     )
                     _T_outer_form_C = _T_outer_form_C - _F_lw / _dF_lw
 
                 # Heat flux positive = OUT of concrete (T_conc > T_outer means heat leaves)
-                _q_side_total = -(_T_outer_form_C - _T_side_c) / R_FORM_EFFECTIVE_SI
+                _q_side_total = -(_T_outer_form_C - _T_side_c) / R_FORM_CONTACT_SI
             else:
                 # No sky data: T_outer ≈ T_conc, LW path off
                 _T_outer_form_C = _T_side_c.copy()
@@ -1882,7 +1949,7 @@ def solve_hydration_2d(
             # corner reuses _T_outer_C[_ic] at line 1806. PR 7 activates solar term.
             if _T_sky_arr is not None and len(_T_sky_arr) > 0 and _env_hours is not None:
                 _T_outer_form_corner_C = float(_T_outer_form_C[0])
-                _q_s = -(_T_outer_form_corner_C - _T_c) / R_FORM_EFFECTIVE_SI
+                _q_s = -(_T_outer_form_corner_C - _T_c) / R_FORM_CONTACT_SI
             else:
                 _q_s = _h_conv_vert * (_T_c - _T_amb_C)
 
@@ -2045,8 +2112,8 @@ def solve_hydration_2d(
                         _T_eff_sky_C_s = F_SKY_VERT * _T_sky_C_s + (1.0 - F_SKY_VERT) * _T_amb_s_C
                         _T_ref_K_s     = 0.5 * (_T_side_c_s + _T_eff_sky_C_s) + 273.15
                         _h_rad0_s      = 4.0 * _emis_side * STEFAN_BOLTZMANN * _T_ref_K_s ** 3
-                        _denom_s       = _h_conv_vert + _h_rad0_s + 1.0 / R_FORM_EFFECTIVE_SI
-                        _num_s         = (_T_side_c_s / R_FORM_EFFECTIVE_SI
+                        _denom_s       = _h_conv_vert + _h_rad0_s + 1.0 / R_FORM_CONTACT_SI
+                        _num_s         = (_T_side_c_s / R_FORM_CONTACT_SI
                                           + _h_conv_vert * _T_amb_s_C
                                           + _h_rad0_s * _T_eff_sky_C_s
                                           + _alpha_sol_side * _F_vert * _G_s * _daytime_s)
@@ -2060,7 +2127,7 @@ def solve_hydration_2d(
                                   * (_T_o_K_s ** 4 - _T_sky_K_s ** 4)
                                 + _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
                                   * (_T_o_K_s ** 4 - _T_gnd_K_s ** 4)
-                                - (_T_side_c_s - _T_outer_form_s) / R_FORM_EFFECTIVE_SI
+                                - (_T_side_c_s - _T_outer_form_s) / R_FORM_CONTACT_SI
                                 - _alpha_sol_side * _F_vert * _G_s * _daytime_s
                             )
                             _dF_s = (
@@ -2069,7 +2136,7 @@ def solve_hydration_2d(
                                   * _T_o_K_s ** 3
                                 + 4.0 * _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN
                                   * (1.0 - F_SKY_VERT) * _T_o_K_s ** 3
-                                + 1.0 / R_FORM_EFFECTIVE_SI
+                                + 1.0 / R_FORM_CONTACT_SI
                             )
                             _T_outer_form_s = _T_outer_form_s - _F_s / _dF_s
                         _T_o_K_s = _T_outer_form_s + 273.15

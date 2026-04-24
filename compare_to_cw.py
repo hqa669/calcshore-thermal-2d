@@ -302,7 +302,7 @@ def _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
                result=None, grid=None):
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(3, 3, figsize=(15, 12))
+    fig, axes = plt.subplots(4, 3, figsize=(15, 16))
     fig.suptitle("CalcShore Engine vs CW MIX-01 Austin", fontsize=13)
 
     # Row 1 — (a) Peak T center core
@@ -395,6 +395,43 @@ def _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
         ax.legend(fontsize=7, loc="best")
         ax.grid(alpha=0.3)
     ax.set_title("(i) Total top-surface flux (W/m², positive=heat out)")
+
+    # Row 4 — form-face flux panels; corner row = index 0 (topmost side row)
+    # (j) Solar flux on form face — parallels (g)
+    ax = axes[3, 0]
+    if result is not None and result.q_side_solar_history is not None:
+        q_side_sol = result.q_side_solar_history[:, 0]
+        ax.plot(t_hrs, q_side_sol, color="tab:red", label="Solar flux (corner row)")
+        ax.axhline(0.0, color="gray", alpha=0.3, linestyle=":")
+        ax.set_xlabel("t (hr)"); ax.set_ylabel("q_sw (W/m²)")
+        ax.legend(fontsize=8)
+    ax.set_title("(j) Solar flux on form face (W/m², negative=heat in)")
+
+    # (k) Longwave flux on form face — parallels (h)
+    ax = axes[3, 1]
+    if result is not None and result.q_side_LW_history is not None:
+        q_side_lw = result.q_side_LW_history[:, 0]
+        ax.plot(t_hrs, q_side_lw, color="tab:purple", label="q_LW form face (corner row)")
+        ax.axhline(0.0, color="gray", alpha=0.3, linestyle=":")
+        ax.set_xlabel("t (hr)"); ax.set_ylabel("q_lw (W/m²)")
+        ax.legend(fontsize=8)
+    ax.set_title("(k) Form-face longwave (W/m², positive=heat out)")
+
+    # (l) Total form-face flux decomposition — parallels (i); no evap on side face
+    ax = axes[3, 2]
+    if (result is not None
+            and result.q_side_total_history is not None
+            and result.q_side_conv_history is not None):
+        ax.plot(t_hrs, result.q_side_conv_history[:, 0],  ls="--", color="tab:blue",   lw=0.8, label="Convection")
+        ax.plot(t_hrs, result.q_side_solar_history[:, 0], ls="--", color="tab:orange", lw=0.8, label="Solar (effective)")
+        ax.plot(t_hrs, result.q_side_LW_history[:, 0],    ls="--", color="tab:purple", lw=0.8, label="LW (effective)")
+        ax.plot(t_hrs, result.q_side_total_history[:, 0], color="black", lw=1.5, label="Total")
+        ax.axhline(0.0, color="gray", alpha=0.3, linestyle=":")
+        ax.set_xlabel("t (hr)")
+        ax.set_ylabel("W/m² (positive = heat out)")
+        ax.legend(fontsize=7, loc="best")
+        ax.grid(alpha=0.3)
+    ax.set_title("(l) Total form-face flux (W/m², positive=heat out)")
 
     plt.tight_layout()
     out = "cw_comparison_MIX-01.png"

@@ -16,3 +16,6 @@ venv/
 cw_comparison_MIX-*.png
 pr*_sanity.png
 calibrate_f_vert.py
+
+# Local-only sprint diagnostic scripts (see Sprint 2 retrospective)
+verify_pr*.py

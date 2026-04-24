@@ -18,7 +18,7 @@ from thermal_engine_2d import (
     EMIS_GROUND,
     EMISSIVITY_DEFAULT,
     F_SKY_VERT,
-    R_FORM_EFFECTIVE_SI,
+    R_FORM_CONTACT_SI,
     SOLAR_ABSORPTIVITY_DEFAULT,
     STEFAN_BOLTZMANN,
     build_grid_half_mat,
@@ -192,8 +192,8 @@ def test_pr7_newton_convergence_with_solar():
         T_eff_sky_C = F_SKY_VERT * T_sky_C + (1.0 - F_SKY_VERT) * T_amb_C
         T_ref_K  = 0.5 * (T_conc_C + T_eff_sky_C) + 273.15
         h_rad0   = 4.0 * EMISSIVITY_DEFAULT * STEFAN_BOLTZMANN * T_ref_K ** 3
-        denom    = h_conv + h_rad0 + 1.0 / R_FORM_EFFECTIVE_SI
-        num      = (T_conc_C / R_FORM_EFFECTIVE_SI
+        denom    = h_conv + h_rad0 + 1.0 / R_FORM_CONTACT_SI
+        num      = (T_conc_C / R_FORM_CONTACT_SI
                     + h_conv * T_amb_C
                     + h_rad0 * T_eff_sky_C
                     + alpha * f_vert * G_day * daytime)
@@ -206,13 +206,13 @@ def test_pr7_newton_convergence_with_solar():
                     * (T_o_K ** 4 - T_sky_K ** 4)
                   + EMISSIVITY_DEFAULT * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
                     * (T_o_K ** 4 - T_gnd_K ** 4)
-                  - (T_conc_C - T_o) / R_FORM_EFFECTIVE_SI
+                  - (T_conc_C - T_o) / R_FORM_CONTACT_SI
                   - alpha * f_vert * G_day * daytime)
             dF = (h_conv
                   + 4.0 * EMISSIVITY_DEFAULT * STEFAN_BOLTZMANN * F_SKY_VERT * T_o_K ** 3
                   + 4.0 * EMISSIVITY_DEFAULT * EMIS_GROUND * STEFAN_BOLTZMANN
                     * (1.0 - F_SKY_VERT) * T_o_K ** 3
-                  + 1.0 / R_FORM_EFFECTIVE_SI)
+                  + 1.0 / R_FORM_CONTACT_SI)
             T_o -= F / dF
         return T_o
 
