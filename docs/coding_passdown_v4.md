@@ -736,43 +736,64 @@ targets.
 
 ### §7.6.3 PR 15 hypothesis worksheet (B1 — composition-isolated thermal physics)
 
-MIX-04 and MIX-08 share signature: under-predict Peak Max (−1.5°F,
-−1.4°F), under-predict Peak Gradient (−2.5°F, −3.6°F), high Corner RMS
-(3.03°F, 4.05°F). Same direction, both mixes. Engine is *under-cooling*
-the form face for low/mid SCM mixes; equivalently, real concrete is
-hotter at the form than the engine predicts.
+**PR 15 finding — diagnostic-only close, Decision D.**
 
-Per §6.3, PR 15 starts with diagnostic scripts before any fix is coded.
-Hypotheses to falsify, in order of cheapness:
+PeakMax Δ is boundary-physics-invariant. Across 48 sweep points
+(F_vert 0.00–0.50 × 3 mixes; R_form 0.040–0.200 × 3 mixes), MIX-04
+PeakMax Δ held at −1.46°F and MIX-08 PeakMax Δ at −1.43°F at every
+value without exception. Neither F_vert nor R_form moves the core peak
+temperature. B1's dominant failures (PeakMax, PeakGrad at current
+defaults) are hydration-heat-generation-driven, not boundary-physics-
+driven. **Routed to Sprint 5 (dual-peak hydration work).** Full sweep
+data: `validation/diagnostics/pr15_b1_sweeps.md`.
 
-**H1 — F_vert calibration is composition-dependent.** F_VERT_BY_ORIENTATION
-["unknown"]=0.15 was MIX-01 calibrated (Sprint 2 PR 8). Sprint 2 sweep
-showed F_vert was a low-sensitivity knob on MIX-01 (0.36°F Corner RMS
-across full 0.0–0.5 sweep), but composition might shift sensitivity.
-Diagnostic: F_vert sweep on MIX-04 and MIX-08, same anchor-inject
-pattern as Sprint 3's soil sweep. Look for monotone authority and
-which value (if any) drives B1 to S0 PASS.
+B1 failure is dual-source — core and corner are opposite-signed:
 
-**H2 — R_form is composition-dependent.** ADR-04 fixed R_form at 0.0862
-m²·K/W as physical contact resistance for steel form + wet concrete
-film per ACI 347. ACI 347's value derivation assumes a specific
-mix-design context; low/mid SCM might have different film thermal
-behavior. Diagnostic: R_form sweep on MIX-04 and MIX-08 across
-0.04–0.20. Look for monotone authority. Compare swept curves between
-MIX-04, MIX-08, and MIX-01 to determine if R_form has different
-optimal values for different SCM.
+1. **Core too cold** (PeakMax −1.46°F / −1.43°F, PeakGrad −2.45°F /
+   −3.61°F at current defaults) — hydration heat generation, Sprint 5
+   scope. Immovable by boundary-physics calibration.
+2. **Corner too hot** (CornerRMS 3.03°F / 4.05°F at current defaults)
+   — engine over-predicts form-face corner temperature. Lower F_vert
+   and lower R_form both reduce CornerRMS monotonically. The original
+   §7.6.3 framing ("engine under-cools the form face") was incorrect
+   at the corner; the corner is over-predicted, not under-predicted.
 
-**H3 — Some boundary heat-flux term scales with mix composition we
-don't capture.** Catch-all hypothesis if H1 and H2 don't fit.
-Diagnostics: which gate fails first as F_vert or R_form moves toward
-B1's optimum? If Corner RMS drops but Peak Max stays off, the
-boundary-physics fix is partial; rest is something else (hydration
-peak shape, internal energy balance, etc.).
+**R_form=0.060 secondary finding (diagnostic observation, not a
+pre-committed Sprint 5 target):** At R_form=0.060, MIX-01 stays 5/5,
+MIX-04 reaches 4/5 (PeakGrad=−0.47°F PASS, CornerRMS=1.29°F PASS;
+only PeakMax=−1.46°F fails), MIX-08 reaches 4/5 (PeakGrad=−1.49°F
+PASS, CornerRMS=1.79°F PASS; only PeakMax=−1.43°F fails). If Sprint 5
+fixes the hydration model (PeakMax), an R_form recalibration from
+0.0862 → 0.060 may then complete B1. Sprint 5 should evaluate this
+jointly — not pre-commit it now.
 
-PR 15 prompt picks one hypothesis to investigate first based on which
-diagnostic is cheapest (likely H1 — F_vert sweep is one anchor-inject,
-no engine code change). Stop conditions per §6.6 are mandatory in PR
-15's prompt.
+**ADR-04 load-bearing note:** The R_form sweep shows MIX-01 is 5/5 at
+both 0.060 and 0.0862, and drops to 4/5 at 0.100 (CornerRMS=3.11°F
+exceeds the 3.0°F S0 threshold). ADR-04's value of 0.0862 sits at the
+high end of MIX-01's 5/5 tolerance window — not wrong, but with limited
+upward margin. This is load-bearing information for Sprint 5, not a
+calibration claim.
+
+Original hypotheses and their dispositions:
+
+**H1 — F_vert calibration is composition-dependent.** FALSIFIED for
+PeakMax (zero authority across 0.00–0.50 sweep). Confirmed for
+CornerRMS (monotone: lower F_vert → lower CornerRMS for B1). Not a
+viable single-knob fix because PeakMax is the binding constraint.
+
+**H2 — R_form is composition-dependent.** FALSIFIED for PeakMax (zero
+authority across 0.040–0.200 sweep). R_form has significant authority
+over PeakGrad and CornerRMS. At R_form=0.060, B1 PeakGrad and
+CornerRMS both pass. Not a viable single-knob fix because PeakMax is
+the binding constraint.
+
+**H3 — Some boundary heat-flux term scales with mix composition.**
+MOOT at the boundary-physics level. The dominant residual (PeakMax
+invariance) is not a catch-all boundary term — it is the hydration
+heat generation itself, which is Sprint 5 scope.
+
+Phase 1 gate checks: passed. MIX-01 holds 5/5 at default F_vert=0.15
+and default R_form=0.0862. No stop condition triggered.
 
 ### §7.6.4 PR 16 hypothesis worksheet (B2 — placement-temperature-isolated boundary physics)
 
