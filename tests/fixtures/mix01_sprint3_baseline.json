@@ -1,0 +1,25 @@
+{
+  "engine": {
+    "peak_max_F": 129.27090571480477,
+    "peak_max_hr": 149.5,
+    "peak_grad_F": 38.81434832866985,
+    "peak_grad_hr": 168.0
+  },
+  "cw": {
+    "peak_max_F": 129.56,
+    "peak_max_hr": 145.75,
+    "peak_grad_F": 39.29400000000001,
+    "peak_grad_hr": 146.166666666667
+  },
+  "deltas": {
+    "peak_max_F": -0.28909428519523317,
+    "peak_grad_F": -0.47965167133015996
+  },
+  "rms": {
+    "field_F": 0.8771467635916573,
+    "center_F": 0.7380826205675904,
+    "corner_F": 2.2592614786204894
+  },
+  "s0_overall": true,
+  "s0_pass_count": 5
+}

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-CW MIX-01 validation harness.
+CW thermal validation harness — single-scenario CLI and multi-scenario library.
 
-Usage:
+Usage (CLI):
     python compare_to_cw.py <directory>
 
 <directory> must contain input.dat, weather.dat, output.txt.
 
 Exit 0 if ALL metrics PASS. Exit 1 if ANY FAIL.
+
+Library use: from compare_to_cw import run_one, print_gate_table
 """
 
 import sys
@@ -36,12 +38,6 @@ S1_TOL_FIELD_RMS_F   = 1.0
 S1_TOL_CENTER_RMS_F  = 0.5
 S1_TOL_CORNER_RMS_F  = 2.0   # Sprint 3 tightened; Sprint 4 multi-climate target
 
-# CW reference values for MIX-01 (docs/coding_passdown_v3.md)
-CW_PEAK_MAX_F    = 129.6
-CW_PEAK_MAX_T_HR = 145.8
-CW_PEAK_GRAD_F   = 39.3
-CW_PEAK_GRAD_T_HR = 146.2
-
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -69,10 +65,34 @@ def pass_fail(ok):
     return "PASS" if ok else "FAIL"
 
 
-def main():
-    args = parse_args()
-    d = args.scenario_dir.rstrip("/")
-    check_files(d)
+def run_one(scenario_dir: str, *, png_path: str | None = None) -> dict:
+    """
+    Run thermal engine on a single CW scenario directory.
+
+    Parameters
+    ----------
+    scenario_dir : str
+        Directory containing input.dat, weather.dat, output.txt.
+        If output.txt is missing, returns a skipped sentinel dict.
+    png_path : str | None
+        If provided, write the 4×3 comparison grid to this path.
+        If None, no PNG is written.
+
+    Returns
+    -------
+    dict — see module docstring for full key inventory.
+    """
+    d = scenario_dir.rstrip("/")
+
+    # Sentinel: missing output.txt → skip without raising, no engine run.
+    # CLI path uses check_files() for hard errors; library path uses sentinel.
+    if not os.path.isfile(os.path.join(d, "output.txt")):
+        return {
+            "scenario_dir": d,
+            "skipped": True,
+            "skip_reason": "no_cw_output",
+            "scenario_name": os.path.basename(d),
+        }
 
     # ------------------------------------------------------------------ #
     # 1. Load scenario
@@ -155,6 +175,7 @@ def main():
     cw_corner_F = None
     center_rms_F = None
     corner_rms_F = None
+    n_samples_rms = None
 
     # ------------------------------------------------------------------ #
     # VALIDATION WINDOW (PR 8.5)
@@ -227,10 +248,11 @@ def main():
     pass_center    = (center_rms_F < TOL_CENTER_RMS_F) if center_rms_F is not None else None
     pass_corner    = (corner_rms_F < TOL_CORNER_RMS_F) if corner_rms_F is not None else None
 
-    overall = pass_peak_max and pass_peak_grad
-    if pass_field is not None:  overall = overall and pass_field
-    if pass_center is not None: overall = overall and pass_center
-    if pass_corner is not None: overall = overall and pass_corner
+    s0_non_none = {k: v for k, v in {
+        "peak_max": pass_peak_max, "peak_grad": pass_peak_grad,
+        "field": pass_field, "center": pass_center, "corner": pass_corner,
+    }.items() if v is not None}
+    s0_overall = all(s0_non_none.values())
 
     # S1 aspirational (documentary only — never affects exit code)
     s1_peak_max  = abs(peak_max_delta) < S1_TOL_PEAK_MAX_F
@@ -238,68 +260,164 @@ def main():
     s1_field     = (field_rms_F  < S1_TOL_FIELD_RMS_F)  if field_rms_F  is not None else False
     s1_center    = (center_rms_F < S1_TOL_CENTER_RMS_F) if center_rms_F is not None else False
     s1_corner    = (corner_rms_F < S1_TOL_CORNER_RMS_F) if corner_rms_F is not None else False
-    s1_count = sum([s1_peak_max, s1_peak_grad, s1_field, s1_center, s1_corner])
 
     # ------------------------------------------------------------------ #
-    # 7. Print formatted table
+    # 7. Scenario metadata (SCM% for run_all.py markdown; computed from
+    #    already-loaded scn so no extra I/O)
     # ------------------------------------------------------------------ #
-    n_out   = result.n_output_samples
-    n_steps = result.n_inner_steps
-    n_nodes = grid.nx * grid.ny
-    scenario_name = "MIX-01 Austin 2026-07-15"
+    m = scn.mix
+    scm_pct = 100.0 * (
+        m.fly_ash_F_lb_yd3 + m.fly_ash_C_lb_yd3
+        + m.ggbfs_lb_yd3 + m.silica_fume_lb_yd3
+    ) / m.total_cementitious_lb_yd3
 
-    def s1_mark(ok): return "✓" if ok else "✗"
-
-    print()
-    print(f"  {scenario_name}  ({168} hr run, {n_steps} timesteps, {n_nodes} nodes)")
-    if field_rms_F is not None:
-        print(f"  (RMS metrics evaluated on t ∈ [{T_START_RMS_HR:.0f}, 168]hr = {n_samples_rms} samples)")
-    print(f"  Peak Max T:     Engine {engine_peak_max_F:6.1f}°F @ {engine_peak_max_hr:5.1f} hr | CW {cw_peak_max_F:6.1f}°F @ {cw_peak_max_hr:.1f} hr")
-    print(f"                  Δ = {peak_max_delta:+.1f}°F   [{pass_fail(pass_peak_max)}] (S0 ±{TOL_PEAK_MAX_F:.1f}°F)  [S1-aspire ±{S1_TOL_PEAK_MAX_F:.1f}°F: {s1_mark(s1_peak_max)}]")
-    print(f"  Peak Gradient:  Engine {engine_peak_grad_F:5.1f}°F @ {engine_peak_grad_hr:5.1f} hr | CW {cw_peak_grad_F:5.1f}°F @ {CW_PEAK_GRAD_T_HR:.1f} hr")
-    print(f"                  Δ = {peak_grad_delta:+.1f}°F   [{pass_fail(pass_peak_grad)}] (S0 ±{TOL_PEAK_GRAD_F:.1f}°F)  [S1-aspire ±{S1_TOL_PEAK_GRAD_F:.1f}°F: {s1_mark(s1_peak_grad)}]")
-
-    if field_rms_F is not None:
-        print(f"  Field-wide RMS: {field_rms_F:.2f}°F        [{pass_fail(pass_field)}] (S0 tol {TOL_FIELD_RMS_F:.1f}°F)    [S1-aspire {S1_TOL_FIELD_RMS_F:.1f}°F: {s1_mark(s1_field)}]")
-    else:
-        print(f"  Field-wide RMS: N/A (CW T_field_F not in fixture)")
-
-    if center_rms_F is not None:
-        print(f"  Centerline RMS: {center_rms_F:.2f}°F        [{pass_fail(pass_center)}] (S0 tol {TOL_CENTER_RMS_F:.1f}°F)    [S1-aspire {S1_TOL_CENTER_RMS_F:.1f}°F: {s1_mark(s1_center)}]")
-    else:
-        print(f"  Centerline RMS: N/A (CW T_field_F not in fixture)")
-
-    if corner_rms_F is not None:
-        print(f"  Corner RMS:     {corner_rms_F:.2f}°F        [{pass_fail(pass_corner)}] (S0 tol {TOL_CORNER_RMS_F:.1f}°F)    [S1-aspire {S1_TOL_CORNER_RMS_F:.1f}°F: {s1_mark(s1_corner)}]")
-    else:
-        print(f"  Corner RMS:     N/A (CW T_field_F not in fixture)")
-
-    print(f"  Runtime:        {t_wall_s:.1f} s")
-    overall_str = "[PASS]" if overall else "[FAIL]"
-    print(f"  OVERALL:        {overall_str}    S1-aspire: {s1_count}/5 metrics meet")
-    print()
+    scenario_name = (
+        f"{os.path.basename(d)}"
+        f" {scn.environment.location}"
+        f" {scn.construction.placement_date}"
+    )
 
     # ------------------------------------------------------------------ #
     # 8. Optional plot
     # ------------------------------------------------------------------ #
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
-                   val, cw_center_F, cw_corner_F, grad_series, d,
-                   result=result, grid=grid)
-    except ImportError:
-        pass  # silently skip if matplotlib not installed
-    except Exception:
-        pass  # don't crash on plot errors
+    if png_path is not None:
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
+                       val, cw_center_F, cw_corner_F, grad_series, d,
+                       result=result, grid=grid, out_path=png_path)
+        except ImportError:
+            pass  # silently skip if matplotlib not installed
+        except Exception:
+            pass  # don't crash on plot errors
 
-    sys.exit(0 if overall else 1)
+    return {
+        "scenario_dir": d,
+        "skipped": False,
+        "skip_reason": None,
+        "scenario_name": scenario_name,
+        "meta": {
+            "scm_pct": scm_pct,
+            "placement_temp_F": scn.construction.placement_temp_F,
+            "total_cementitious_lb_yd3": m.total_cementitious_lb_yd3,
+        },
+        "engine": {
+            "peak_max_F":       engine_peak_max_F,
+            "peak_max_hr":      engine_peak_max_hr,
+            "peak_grad_F":      engine_peak_grad_F,
+            "peak_grad_hr":     engine_peak_grad_hr,
+            "t_wall_s":         t_wall_s,
+            "n_steps":          result.n_inner_steps,
+            "n_nodes":          grid.nx * grid.ny,
+            "n_output_samples": result.n_output_samples,
+        },
+        "cw": {
+            "peak_max_F":  cw_peak_max_F,
+            "peak_max_hr": cw_peak_max_hr,
+            "peak_grad_F": cw_peak_grad_F,
+            "peak_grad_hr": cw_peak_grad_hr,
+        },
+        "deltas": {
+            "peak_max_F":  peak_max_delta,
+            "peak_grad_F": peak_grad_delta,
+        },
+        "rms": {
+            "field_F":  field_rms_F,
+            "center_F": center_rms_F,
+            "corner_F": corner_rms_F,
+        },
+        "s0": {
+            "peak_max": pass_peak_max,
+            "peak_grad": pass_peak_grad,
+            "field":    pass_field,
+            "center":   pass_center,
+            "corner":   pass_corner,
+        },
+        "s0_pass_count": sum(s0_non_none.values()),
+        "s0_pass_total": len(s0_non_none),
+        "s0_overall":    s0_overall,
+        "s1_aspire": {
+            "peak_max":  s1_peak_max,
+            "peak_grad": s1_peak_grad,
+            "field":     s1_field,
+            "center":    s1_center,
+            "corner":    s1_corner,
+        },
+        "rms_window_hr":  (T_START_RMS_HR, 168.0),
+        "rms_n_samples":  n_samples_rms,
+    }
+
+
+def print_gate_table(result: dict, scenario_name: str | None = None) -> None:
+    """Print the formatted gate table to stdout. Handles skipped sentinel."""
+    name = scenario_name if scenario_name is not None else result.get("scenario_name", "")
+
+    if result.get("skipped"):
+        print(f"  {name}  — skipped ({result.get('skip_reason', '')})")
+        return
+
+    def s1_mark(ok): return "✓" if ok else "✗"
+
+    eng    = result["engine"]
+    cw     = result["cw"]
+    deltas = result["deltas"]
+    rms_d  = result["rms"]
+    s0     = result["s0"]
+    s1     = result["s1_aspire"]
+    s1_count = sum(s1.values())
+
+    field_rms_F  = rms_d["field_F"]
+    center_rms_F = rms_d["center_F"]
+    corner_rms_F = rms_d["corner_F"]
+
+    T_START_RMS_HR = result["rms_window_hr"][0]
+    n_samples_rms  = result["rms_n_samples"]
+
+    print()
+    print(f"  {name}  ({168} hr run, {eng['n_steps']} timesteps, {eng['n_nodes']} nodes)")
+    if field_rms_F is not None:
+        print(f"  (RMS metrics evaluated on t ∈ [{T_START_RMS_HR:.0f}, 168]hr = {n_samples_rms} samples)")
+    print(f"  Peak Max T:     Engine {eng['peak_max_F']:6.1f}°F @ {eng['peak_max_hr']:5.1f} hr | CW {cw['peak_max_F']:6.1f}°F @ {cw['peak_max_hr']:.1f} hr")
+    print(f"                  Δ = {deltas['peak_max_F']:+.1f}°F   [{pass_fail(s0['peak_max'])}] (S0 ±{TOL_PEAK_MAX_F:.1f}°F)  [S1-aspire ±{S1_TOL_PEAK_MAX_F:.1f}°F: {s1_mark(s1['peak_max'])}]")
+    print(f"  Peak Gradient:  Engine {eng['peak_grad_F']:5.1f}°F @ {eng['peak_grad_hr']:5.1f} hr | CW {cw['peak_grad_F']:5.1f}°F @ {cw['peak_grad_hr']:.1f} hr")
+    print(f"                  Δ = {deltas['peak_grad_F']:+.1f}°F   [{pass_fail(s0['peak_grad'])}] (S0 ±{TOL_PEAK_GRAD_F:.1f}°F)  [S1-aspire ±{S1_TOL_PEAK_GRAD_F:.1f}°F: {s1_mark(s1['peak_grad'])}]")
+
+    if field_rms_F is not None:
+        print(f"  Field-wide RMS: {field_rms_F:.2f}°F        [{pass_fail(s0['field'])}] (S0 tol {TOL_FIELD_RMS_F:.1f}°F)    [S1-aspire {S1_TOL_FIELD_RMS_F:.1f}°F: {s1_mark(s1['field'])}]")
+    else:
+        print(f"  Field-wide RMS: N/A (CW T_field_F not in fixture)")
+
+    if center_rms_F is not None:
+        print(f"  Centerline RMS: {center_rms_F:.2f}°F        [{pass_fail(s0['center'])}] (S0 tol {TOL_CENTER_RMS_F:.1f}°F)    [S1-aspire {S1_TOL_CENTER_RMS_F:.1f}°F: {s1_mark(s1['center'])}]")
+    else:
+        print(f"  Centerline RMS: N/A (CW T_field_F not in fixture)")
+
+    if corner_rms_F is not None:
+        print(f"  Corner RMS:     {corner_rms_F:.2f}°F        [{pass_fail(s0['corner'])}] (S0 tol {TOL_CORNER_RMS_F:.1f}°F)    [S1-aspire {S1_TOL_CORNER_RMS_F:.1f}°F: {s1_mark(s1['corner'])}]")
+    else:
+        print(f"  Corner RMS:     N/A (CW T_field_F not in fixture)")
+
+    print(f"  Runtime:        {eng['t_wall_s']:.1f} s")
+    overall_str = "[PASS]" if result["s0_overall"] else "[FAIL]"
+    print(f"  OVERALL:        {overall_str}    S1-aspire: {s1_count}/5 metrics meet")
+    print()
+
+
+def main():
+    args = parse_args()
+    d = args.scenario_dir.rstrip("/")
+    check_files(d)
+    png_path = f"cw_comparison_{os.path.basename(d)}.png"
+    result = run_one(d, png_path=png_path)
+    print_gate_table(result)
+    sys.exit(0 if result.get("s0_overall", False) else 1)
 
 
 def _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
                val, cw_center_F, cw_corner_F, grad_series, scenario_dir,
-               result=None, grid=None):
+               result=None, grid=None, out_path: str = "cw_comparison.png"):
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(4, 3, figsize=(15, 16))
@@ -434,10 +552,9 @@ def _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
     ax.set_title("(l) Total form-face flux (W/m², positive=heat out)")
 
     plt.tight_layout()
-    out = "cw_comparison_MIX-01.png"
-    plt.savefig(out, dpi=100)
+    plt.savefig(out_path, dpi=100)
     plt.close(fig)
-    print(f"  Plot saved: {out}")
+    print(f"  Plot saved: {out_path}")
 
 
 if __name__ == "__main__":
