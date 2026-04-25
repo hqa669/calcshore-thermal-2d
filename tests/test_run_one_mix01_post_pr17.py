@@ -1,6 +1,12 @@
 """
-PR 13 contract test: run_one() must be bit-identical to Sprint 3 close on MIX-01.
-Any numeric deviation is a regression in the refactor, not a feature.
+PR 17 regression test: run_one() on MIX-01 must match post-PR-17 baseline.
+
+PR 17 changed soil defaults from (lag=5.0, damping=0.7) to (lag=0.0,
+damping=1.0), shifting MIX-01 numbers. This file replaces
+test_run_one_mix01_bit_identical.py per PR 11 + PR 17 precedent: when a
+calibration default changes by design, the bit-identical contract is moot
+and the baseline resets. The original sprint-3-complete fixture is preserved
+at tests/fixtures/mix01_sprint3_baseline.json for historical reference.
 """
 import json
 import os
@@ -11,7 +17,7 @@ pytest.importorskip("thermal_engine_2d")
 
 from compare_to_cw import run_one  # noqa: E402
 
-FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "mix01_sprint3_baseline.json")
+FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "mix01_pr17_baseline.json")
 SCENARIO = "validation/cw_exports/MIX-01"
 
 
@@ -20,7 +26,7 @@ def _load_baseline():
         return json.load(f)
 
 
-def test_mix01_bit_identical():
+def test_mix01_bit_identical_post_pr17():
     if not os.path.isdir(SCENARIO):
         pytest.skip("MIX-01 scenario directory not found")
 
@@ -29,7 +35,7 @@ def test_mix01_bit_identical():
 
     assert not result["skipped"], "run_one returned skipped for MIX-01"
 
-    # Exact float equality — refactor must not change a single bit
+    # Exact float equality — any numeric deviation is a regression
     for key in ("peak_max_F", "peak_max_hr", "peak_grad_F", "peak_grad_hr"):
         assert result["engine"][key] == expected["engine"][key], (
             f"engine.{key}: got {result['engine'][key]!r}, expected {expected['engine'][key]!r}"

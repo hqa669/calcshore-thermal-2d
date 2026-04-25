@@ -192,11 +192,16 @@ class CWConstruction:
     soil_temp_F: float = 80.0
     footing_subbase: str = "Limestone"
 
-    # Sprint 3 / Barber soil model (§2.3.1 coding_passdown_v4.md).
-    # PR 10 is plumbing-only: these defaults have no effect on the engine until
-    # PR 11 wires ground_surface_temperature_C() into the form-face Newton residual.
-    soil_lag_hrs: float = 5.0
-    soil_damping: float = 0.7
+    # Barber soil model fields (Sprint 3 / PR 10–11, §2.3.1 coding_passdown_v4.md).
+    # PR 17 (R4 disposition): defaults reverted to no-op pair — T_ground(t) = T_amb(t).
+    # Empirical justification: §7.5.2 (14-mix library has zero climate variation; all TX
+    # Austin; soil params identical across all mixes); Sprint 3 sweep showed damping
+    # unidentifiable on MIX-01 (<0.01°F authority). Without identifiability data across
+    # climates, defaults that introduce phase offset degrade fit monotonically.
+    # Fields retained (not removed) for future cold-climate exports where diurnal
+    # ground-air differentials become large enough to be identifiable. See ADR-08.
+    soil_lag_hrs: float = 0.0     # PR 17: 5.0 → 0.0 (no-op)
+    soil_damping: float = 1.0     # PR 17: 0.7 → 1.0 (no-op); deprecated, retained for cold-climate data
 
 
 @dataclass

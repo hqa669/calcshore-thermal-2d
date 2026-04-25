@@ -77,11 +77,14 @@ def test_ablation_reproduces_sprint2():
 # Class B — activation: defaults must change the trajectory
 # ============================================================
 
-def test_defaults_differ_from_sprint2():
-    """Default construction (damping=0.7, lag=5.0) must diverge from sprint-2-complete."""
+def test_nondefault_params_differ_from_sprint2():
+    """PR 11 Barber params (damping=0.7, lag=5.0) must diverge from sprint-2-complete.
+    Params set explicitly — PR 17 changed defaults to no-op (0.0, 1.0)."""
     if not FIXTURE_PATH.exists():
         pytest.skip(f"Fixture not found at {FIXTURE_PATH} — run fixture-gen script first")
     scn = _load_mix01()
+    scn.construction.soil_lag_hrs = 5.0
+    scn.construction.soil_damping = 0.7
     result = _run_mix01(scn)
     fixture = np.load(FIXTURE_PATH)
     max_diff = float(np.max(np.abs(result.T_field_C[::4] - fixture["T_field_C"])))
@@ -108,9 +111,12 @@ def test_t_ground_history_populated():
     )
 
 
-def test_t_ground_history_is_lagged_and_damped():
-    """End-to-end check: T_ground amplitude ≈ 0.7 · T_amb amplitude in [48, 168]hr window."""
+def test_t_ground_lagged_damped_with_pr11_params():
+    """End-to-end: T_ground amplitude ≈ 0.7 · T_amb amplitude in [48, 168]hr window.
+    Params set explicitly (lag=5.0, damping=0.7) — PR 17 changed defaults to no-op."""
     scn = _load_mix01()
+    scn.construction.soil_lag_hrs = 5.0
+    scn.construction.soil_damping = 0.7
     result = _run_mix01(scn)
     t_hrs = result.t_s / 3600.0
     mask = (t_hrs >= 48.0) & (t_hrs <= 168.0)

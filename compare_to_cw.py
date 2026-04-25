@@ -287,7 +287,9 @@ def run_one(scenario_dir: str, *, png_path: str | None = None) -> dict:
             import matplotlib.pyplot as plt
             _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
                        val, cw_center_F, cw_corner_F, grad_series, d,
-                       result=result, grid=grid, out_path=png_path)
+                       result=result, grid=grid, out_path=png_path,
+                       soil_lag_hrs=scn.construction.soil_lag_hrs,
+                       soil_damping=scn.construction.soil_damping)
         except ImportError:
             pass  # silently skip if matplotlib not installed
         except Exception:
@@ -417,7 +419,8 @@ def main():
 
 def _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
                val, cw_center_F, cw_corner_F, grad_series, scenario_dir,
-               result=None, grid=None, out_path: str = "cw_comparison.png"):
+               result=None, grid=None, out_path: str = "cw_comparison.png",
+               soil_lag_hrs=None, soil_damping=None):
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(4, 3, figsize=(15, 16))
@@ -533,7 +536,9 @@ def _make_plot(t_hrs, engine_peak_max_F, eng_center_F, eng_corner_F, eng_amb_F,
         ax.axhline(0.0, color="gray", alpha=0.3, linestyle=":")
         ax.set_xlabel("t (hr)"); ax.set_ylabel("q_lw (W/m²)")
         ax.legend(fontsize=8)
-    ax.set_title("(k) Form-face longwave (Barber T_ground, lag=5.0h, damp=0.7; W/m², positive=heat out)")
+    _lag = f"{soil_lag_hrs:.1f}h" if soil_lag_hrs is not None else "?"
+    _damp = f"{soil_damping:.2g}" if soil_damping is not None else "?"
+    ax.set_title(f"(k) Form-face longwave (Barber T_ground, lag={_lag}, damp={_damp}; W/m², positive=heat out)")
 
     # (l) Total form-face flux decomposition — parallels (i); no evap on side face
     ax = axes[3, 2]

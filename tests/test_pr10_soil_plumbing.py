@@ -72,8 +72,8 @@ def _synthetic_env():
 def test_cwconstruction_soil_defaults():
     from cw_scenario_loader import CWConstruction
     c = CWConstruction()
-    assert c.soil_lag_hrs == 5.0
-    assert c.soil_damping == 0.7
+    assert c.soil_lag_hrs == 0.0   # PR 17: default flipped to no-op per R4 disposition
+    assert c.soil_damping == 1.0   # PR 17: default flipped to no-op per R4 disposition
 
 
 def test_hydration_result_has_t_ground_field():

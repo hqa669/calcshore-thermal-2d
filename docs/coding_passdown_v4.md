@@ -283,7 +283,7 @@ and a status (open / mitigated / accepted).
 | R1 | F_VERT_BY_ORIENTATION["unknown"]=0.15 is MIX-01 calibrated only; may not generalize | Sprint 4 PR 15 | Open — diff confirms all evaluation-set mixes have form_orientation="unknown"; if PR 15's B1 fix needs F_vert recalibration, candidate value comes from MIX-04+MIX-08 jointly |
 | R2 | F_VERT_BY_ORIENTATION stub values (south=0.35, east/west=0.42, north=0.20) are geometric guesses, unvalidated | Sprint 6+ | Deferred — entire 14-mix library uses form_orientation="unknown"; non-unknown orientations need new CW exports before R2 is testable |
 | R3 | First-48hr hydration-rise shape divergence between engine and CW; likely requires dual-peak model | Sprint 5 | Accepted (deferred) |
-| R4 | Barber soil parameters (lag, damping) chosen from literature; may not match CW's internal soil model | Sprint 4 PR 17 | Disposition decided: §7.5 found all 8 evaluation-set mixes share soil_lag_hrs=5.0, soil_damping=0.7 in CW exports; combined with Sprint 3 sweep showing no climate variation in library (all TX Austin), parameters are unidentifiable on this dataset. PR 17 sets soil_lag_hrs default → 0.0, deprecates soil_damping (default → 1.0), retains code for future cold-climate data. Updates ADR-08. |
+| R4 | Barber soil parameters (lag, damping) chosen from literature; may not match CW's internal soil model | Sprint 4 PR 17 | **Closed** (tag pr-17-complete). Defaults set to soil_lag_hrs=0.0, soil_damping=1.0 (no-op pair; reduces to T_amb behavior). Helper code retained for future cold-climate data. Reference §7.5.2 (no climate variation in library) and Sprint 3 sweep (damping unidentifiable on MIX-01). ADR-08 updated. |
 | R5 | R_FORM_CONTACT_SI=0.0862 hardcoded assuming steel form; customer pilots may use plywood or plastic-lined forms | Sprint 6 | Open |
 | R6 | Engine tested on half-mat geometry only; behavior on full-mat, slab, or column geometries unvalidated | Sprint 6+ | Open |
 | R7 | Cosmetic RuntimeWarning at harmonic-mean k-divide masks potential future numerical issues | Sprint 6 | Mitigated via np.where guard; cleanup deferred |
@@ -333,10 +333,11 @@ convention going forward; Sprint 5+ dual-peak hydration work may close
 the transient but the window stays as a "boundary physics isolated"
 gate.
 
-**ADR-08 (Sprint 2 close)**: Ground temperature in form-face LW term
-defaults to T_amb (no soil model) as of Sprint 2. Sprint 3 upgrades to
-simplified Barber (sinusoidal lag + damping). Full Barber 1957 diffusion
-model available as a follow-on if simplified doesn't match CW.
+**ADR-08 (Sprint 2 close, updated Sprint 3 + Sprint 4 PR 17)**: Ground temperature in form-face LW term:
+- Sprint 2: defaulted to T_amb (no soil model)
+- Sprint 3: upgraded to simplified Barber (sinusoidal lag + damping); defaults `soil_lag_hrs=5.0`, `soil_damping=0.7`
+- **Sprint 4 PR 17**: defaults reverted to `soil_lag_hrs=0.0`, `soil_damping=1.0` (no-op pair; reduces to T_amb behavior). Helper code retained per R4 disposition. Empirical justification: §7.5.2 confirms 14-mix library has zero climate variation (all TX Austin); Sprint 3 sweep on MIX-01 showed lag dominates Corner RMS sensitivity (~0.03°F/hr) and damping is unidentifiable (<0.01°F authority). Without identifiability data across climates, defaults that introduce phase offset degrade fit monotonically. The helper remains a latent capability for future cold-climate exports where diurnal ground-air differentials become identifiable.
+- Full Barber 1957 diffusion model available as a follow-on if future cold-climate data shows simplified Barber is insufficient.
 
 ---
 
@@ -870,26 +871,15 @@ for cold-placed concrete" sub-hypothesis. Routed to R9 for Sprint 5/6.
 REFINED by H6b (blanket is not the mechanism) and Phase 2.6 (Arrhenius
 rate divergence above ~30°C is the root, not a single IC-pinned code term).
 
-### §7.6.5 Sprint 4 close criteria — recalibrated after PR 16
+### §7.6.5 Sprint 4 close criteria — final disposition (PR 17)
 
-Updated after PR 15 (Decision D) and PR 16 (Decision G):
+After PR 17, all Sprint 4 PRs have landed. Final state:
 
-- **Floor**: PR 13 + 14 land (DONE), Reference 5/5 holds (CONFIRMED),
-  R4 decided (DONE via PR 17 plan), PR 15 lands (DONE, Decision D —
-  B1 routed to Sprint 5), PR 16 lands (DONE, Decision G — B2 routed
-  to R9 with traced mechanism).
-- **Target (recalibrated)**: Original target "B1 + B2 both S0 PASS after
-  PR 15/16" is replaced. B1 routes to Sprint 5 dual-peak hydration scope.
-  B2 routes to R9 (Arrhenius rate divergence above ~30°C). Sprint 4
-  target is now: R4 cleaned (PR 17), mechanisms for B1 and B2 traced and
-  documented with diagnostic evidence. Evaluation set 8/8 S0 deferred to
-  Sprint 5/6 pending R9 resolution and Sprint 5 dual-peak work.
-- **Stretch**: Unchanged — B1 + B2 S1-aspire on Center + Corner RMS, if
-  R9 and Sprint 5 hydration fixes land cleanly.
+- **Floor (achieved)**: PR 13 + 14 + 17 land. Reference 5/5 holds (re-verified post-PR-17). R4 cleaned. PR 15 + 16 land as diagnostic-only with traceable mechanisms (B1 → Sprint 5 dual-peak; B2 → R9 Arrhenius rate divergence above ~30°C).
+- **Target (recalibrated and met)**: Originally "B1 + B2 both S0 PASS." Updated to "B1 routed via Sprint 5 hypothesis; B2 routed via R9 with traced mechanism; R4 cleaned." Both sub-targets achieved.
+- **Stretch (deferred)**: S1-aspire targets for B1/B2 don't apply since neither was calibrated in Sprint 4. Deferred to Sprint 5/6 alongside the routed mechanisms.
 
-Sprint 4 formal close: when PR 17 lands (R4 disposition) and this doc is
-tagged `sprint-4-complete`. PR 16 closes diagnostic-only with mechanisms
-traced and routed. Sprint 5 scope grows by one item (R9).
+Sprint 4 produced two genuinely new mechanism-level findings (B1 boundary-physics PeakMax invariance; R9 cold-IC Arrhenius rate divergence above ~30°C) that did not exist as hypotheses at sprint-3-complete. The structural shift from "calibration sprint" to "characterization sprint" is recorded in §8 Sprint 4 retrospective.
 
 ---
 
