@@ -156,29 +156,92 @@ decisions:
 This is the plan of record. Each sprint's scope may change based on
 findings from prior sprints.
 
-### Sprint 4 — 15-mix validation and F_vert stub replacement (~4–8 weeks)
+### Sprint 4 — Multi-mix thermal-physics validation on hydration-clean evaluation set (~6–10 weeks)
 
-- Export MIX-02..15 CW fixtures to `validation/cw_exports/`
-  (~30–60 hours of manual CW work)
-- Run Sprint 3-hardened engine across all 15 mixes; aggregate S0/S1
-  metrics per mix
-- Identify systematic error patterns by mix family or climate
-- Calibrate or replace F_VERT_BY_ORIENTATION stub values
-  (south/east/west/north) — either from known-orientation mixes in the
-  library or via computed Duffie-Beckman projection
-- Debug any systematic failures surfaced
-- **Soil parameter identifiability (from Sprint 3 sweep)**: evaluate
-  whether `soil_lag_hrs` default should move from 5.0 to 0.0 and
-  whether `soil_damping` warrants remaining as a parameter at all.
-  Decision is identifiability-driven — if no mix in the 15-mix library
-  gives damping >0.01°F Corner RMS authority, the parameter is
-  deprecated (code kept for future cold-climate data, default changed
-  to 1.0 = no-op). If one or more mixes show damping sensitivity, the
-  parameter stays active and defaults are recalibrated per-climate.
+Updated 2026-04-25 from "15-mix validation and F_vert stub replacement"
+based on §7.5 reconnaissance findings.
 
-**Open risks** (see §4): mix-family-specific physics issues (high-slag,
-cold-weather, high-humidity), whether calibrated F_vert generalizes
-across latitudes.
+**Theme**: validate 2D thermal/boundary physics on the subset of mixes
+where hydration tracks CW. Mixes where engine and CW disagree on heat
+generation (high-SCM, slag-heavy) are out of Sprint 4 scope and route to
+Sprint 5's dual-peak hydration work.
+
+**Evaluation set (8 mixes)**: Reference (MIX-01, 02, 03, 11, 12) +
+B1 (MIX-04, 08) + B2 (MIX-15). See §7.5.3 for partitioning rationale.
+
+**Routed to Sprint 5 (6 mixes)**: Cluster A (MIX-05, 06, 07, 09, 10) +
+MIX-14 (borderline hydration miss).
+
+**Deferred (1 mix)**: MIX-13 (no CW output; re-export pending).
+
+#### PR sequence
+
+- **PR 13 — `run_one()` refactor + display fixes**. Lift `main()` body
+  in `compare_to_cw.py` into `run_one(scenario_dir) -> dict` (Approach A,
+  per §7.5 decision). Separate `print_gate_table(result)`. Replace
+  hardcoded MIX-01 peak-time constants (lines 41/43) with per-scenario
+  extraction. Replace hardcoded PNG path (line 437) with parameterized
+  output path. Add `run_all.py` driver with PNG-off-by-default flag.
+  MIX-13 sentinel (no `output.txt` → `{"skipped": True, ...}`). MIX-01
+  bit-identical regression carries the scaffolding-only contract. ~150
+  LOC. Tests for sentinel handling and parameterized PNG path.
+
+- **PR 14 — Baseline data commit**. Run all 14 evaluable mixes via PR 13
+  driver. Commit `validation/sprint4_baseline.md` (per-mix gate table,
+  evaluation-set partitioning columns). Write §7.6 interim retro
+  documenting which mixes hit which gates. No engine changes. Commit IS
+  the deliverable.
+
+- **PR 15 — B1 calibration (composition-isolated thermal physics)**.
+  Targets MIX-04 + MIX-08. Both under-predict Peak Max + Peak Gradient
+  with high Corner RMS at low/mid SCM and 60°F placement. Shared
+  signature → likely form-face or top-boundary term with composition
+  dependence we treat as constant. Hypotheses to investigate (do
+  diagnostics first per §6.3, no pre-committing the fix):
+    - F_vert calibration composition-dependent (R1/R2 still in play)
+    - R_form composition-dependent (currently constant 0.0862, ADR-04)
+    - Some boundary heat-flux term scaling with mix composition
+  Stop conditions explicit per §6.6. Ablation of any new physics term
+  per §6.4.
+
+- **PR 16 — B2 calibration (placement-temperature-isolated boundary
+  physics)**. Targets MIX-15. Cold-placement (45°F vs 60°F Reference)
+  with all other parameters identical to Reference. Round-1 PeakGrad Δ
+  −8.3°F is off-charts vs Sprint 0–3 experience. Hypotheses:
+    - Initial-condition-dependent boundary term (some flux coefficient
+      evaluated at placement temp rather than current temp)
+    - Cold-placement-specific physics (condensation latent heat?)
+    - IC propagation issue when |T₀ − T_amb| is large
+  Diagnostics-first per §6.3. Bit-identical regression on Reference set
+  required.
+
+- **PR 17 — R4 disposition**. With multi-mix evidence in hand:
+  `soil_lag_hrs` default → 0.0; `soil_damping` deprecated (default → 1.0,
+  parameter retained for future cold-climate exports). Per §7's Sprint 3
+  finding generalized over 8 evaluation-set mixes. ~5-line change +
+  comment. Updates ADR-08.
+
+#### Sprint 4 close criteria
+
+- **Floor**: PR 13 + PR 14 land. Reference set (5/5) holds bit-
+  identically. R4 decided. PR 15 lands either fixing B1 or
+  characterizing B1's failure mode and routing residual to Sprint 6
+  with named risk.
+- **Target**: B1 (MIX-04, 08) S0 PASS after PR 15. B2 (MIX-15) S0 PASS
+  after PR 16. R4 cleaned up in PR 17. Evaluation set 8/8 S0 PASS.
+- **Stretch**: B1 + B2 reach S1-aspire on Centerline and Corner RMS.
+
+#### Open risks (see §4)
+
+R1/R2 (F_vert calibration) — owned by PR 15 if B1 hypothesis lands.
+R5/R7 (form material, RuntimeWarning cleanup) — Sprint 6 still.
+R8 (CW hydration parameter inheritance) — accepted-by-design.
+
+#### Tag plan
+
+- `pr-13-complete`, `pr-14-complete`, `pr-15-complete`, `pr-16-complete`,
+  `pr-17-complete`, `sprint-4-complete`. Per §6.8 (new Sprint 3 lesson),
+  verify each tag exists locally before trusting Claude Code's report.
 
 ### Sprint 5 — Dual-peak hydration model (~4–6 weeks)
 
@@ -217,10 +280,10 @@ and a status (open / mitigated / accepted).
 
 | # | Risk | Owner sprint | Status |
 |---|---|---|---|
-| R1 | F_VERT_BY_ORIENTATION["unknown"]=0.15 is MIX-01 calibrated only; may not generalize | Sprint 4 | Open |
-| R2 | F_VERT_BY_ORIENTATION stub values (south=0.35, east/west=0.42, north=0.20) are geometric guesses, unvalidated | Sprint 4 | Open |
+| R1 | F_VERT_BY_ORIENTATION["unknown"]=0.15 is MIX-01 calibrated only; may not generalize | Sprint 4 PR 15 | Open — diff confirms all evaluation-set mixes have form_orientation="unknown"; if PR 15's B1 fix needs F_vert recalibration, candidate value comes from MIX-04+MIX-08 jointly |
+| R2 | F_VERT_BY_ORIENTATION stub values (south=0.35, east/west=0.42, north=0.20) are geometric guesses, unvalidated | Sprint 6+ | Deferred — entire 14-mix library uses form_orientation="unknown"; non-unknown orientations need new CW exports before R2 is testable |
 | R3 | First-48hr hydration-rise shape divergence between engine and CW; likely requires dual-peak model | Sprint 5 | Accepted (deferred) |
-| R4 | Barber soil parameters (lag, damping) chosen from literature; may not match CW's internal soil model | Sprint 3→4 | Data collected Sprint 3 sweep: lag dominates, damping unidentifiable on MIX-01, CW ground appears T_amb-pinned. Sprint 4 decides whether to recalibrate defaults (toward 0.0/1.0) or deprecate soil_damping. |
+| R4 | Barber soil parameters (lag, damping) chosen from literature; may not match CW's internal soil model | Sprint 4 PR 17 | Disposition decided: §7.5 found all 8 evaluation-set mixes share soil_lag_hrs=5.0, soil_damping=0.7 in CW exports; combined with Sprint 3 sweep showing no climate variation in library (all TX Austin), parameters are unidentifiable on this dataset. PR 17 sets soil_lag_hrs default → 0.0, deprecates soil_damping (default → 1.0), retains code for future cold-climate data. Updates ADR-08. |
 | R5 | R_FORM_CONTACT_SI=0.0862 hardcoded assuming steel form; customer pilots may use plywood or plastic-lined forms | Sprint 6 | Open |
 | R6 | Engine tested on half-mat geometry only; behavior on full-mat, slab, or column geometries unvalidated | Sprint 6+ | Open |
 | R7 | Cosmetic RuntimeWarning at harmonic-mean k-divide masks potential future numerical issues | Sprint 6 | Mitigated via np.where guard; cleanup deferred |
@@ -369,6 +432,23 @@ language in prompts must be literal, not aspirational.
 - Claude Code session state is ephemeral; `git log` is the durable
   record
 
+### §6.8 Verify tags exist locally before trusting Claude Code's report
+
+Sprint 3 had two cases (PR 11, PR 12) where Claude Code reported a tag
+created but `git tag -l` showed it absent locally. Reason traced to
+session timing — tag created in the same session that pushed prior
+work, but the tag step was skipped silently when the prompt's tag step
+ran on already-tagged commits.
+
+After every PR that includes a tag step, run:
+git tag -l <expected-tag>          # should print the tag name
+git ls-remote --tags origin <tag>  # should show same SHA
+
+If the local check fails, the tag was never created — re-run the tag
+step explicitly. Sprint 4 will tag pr-13-complete, pr-14-complete,
+pr-15-complete, pr-16-complete, pr-17-complete, sprint-4-complete (six
+tag sites; six places to bite).
+
 ---
 
 ## §7 Sprint 3 retrospective
@@ -468,6 +548,134 @@ Key findings:
   the form face. The sweep showed damping has no effect; the real
   mismatch is phase. Lesson: run the parameter sweep before narrating
   physics from a single parameter point.
+
+---
+
+## §7.5 Sprint 4 reconnaissance findings (pre-PR 13)
+
+Two throwaway diagnostic spikes ran before Sprint 4 PR planning, per
+"data-first" principle (see §7's "run the parameter sweep before
+narrating physics from a single parameter point" lesson, generalized).
+Spike artifacts in `diagnostics/sprint4/` — not committed to main.
+
+### §7.5.1 Round 1: 14-mix S0 baseline
+
+Subprocess-driven loop over `compare_to_cw.py` for MIX-01..15. MIX-13
+skipped (no `output.txt`). Climate column degenerate — all 15 mixes are
+TX, Austin (designed factorial, not natural sample).
+
+| Mix | SCM% | S0 pass | Notable failures |
+|---|---|---|---|
+| MIX-01 | 39.1% | 5/5 | — |
+| MIX-02 | 39.1% | 5/5 | — |
+| MIX-03 | 39.1% | 5/5 | — |
+| MIX-04 | 21.7% | 2/5 | PeakMax −1.5, PeakGrad −2.5, Corner 3.03 |
+| MIX-05 | 52.2% | 4/5 | CenterRMS 1.49 |
+| MIX-06 | 71.3% | 1/5 | PeakMax +2.2, PeakGrad +2.9, Field 2.35, Center 2.81 |
+| MIX-07 | 91.3% | 1/5 | PeakMax +4.1, PeakGrad +4.8, Field 3.82, Center 4.45 |
+| MIX-08 | 17.4% | 2/5 | PeakGrad −3.6, Corner 4.05 |
+| MIX-09 | 41.7% | 1/5 | PeakMax +3.8, Field 4.15, Center 4.84, Corner 4.58 |
+| MIX-10 | 52.2% | 4/5 | Center 1.03 |
+| MIX-11 | 39.1% | 5/5 | — |
+| MIX-12 | 39.1% | 5/5 | — |
+| MIX-13 | — | skipped | no CW output |
+| MIX-14 | 39.1% | 0/5 | PeakMax +1.5, PeakGrad −3.7, Field 3.20, Center 2.29, Corner 4.86 |
+| MIX-15 | 39.1% | 1/5 | PeakMax −3.0, PeakGrad −8.3, Field 4.06, Center 2.07 |
+
+5/14 pass all S0 (MIX-01, 02, 03, 11, 12 — all 39.1% SCM at 60°F
+placement temp). Failure clustering by gate:
+
+- **Centerline RMS** fails on 5/5 high-SCM mixes (MIX-05, 06, 07, 09,
+  10). Monotone with SCM% on Peak Max (+0.7→+2.2→+4.1°F as SCM goes
+  52→71→91%). Hydration mismatch signature.
+- **Other failures** (MIX-04, 08, 14, 15) at mid/low SCM, mixed gate
+  patterns. Not hydration-cluster-aligned.
+
+### §7.5.2 Round 2: hydration screen + construction-parameter diff
+
+Round 1 surfaced two distinct failure clusters. Round 2 partitioned them
+empirically before PR planning.
+
+**Stage 1 — hydration-fit screen.** Computed three early-window
+[12, 36]hr metrics (Centerline RMS, Δ peak rise rate, Δ time-to-half-
+peak) for the 5 Reference mixes and 4 Cluster B candidates (MIX-04, 08,
+14, 15). Threshold = 1.5× Reference worst-case per metric.
+
+| Threshold | Value |
+|---|---|
+| Centerline RMS [12, 36]hr | 1.80°F |
+| Δ peak rise rate | 0.20°F/hr |
+| Δ time-to-half-peak | 2.13 hr |
+
+Results:
+- MIX-04: hydration_pass (RMS 0.50, Δrise 0.04, Δt½ 0.58)
+- MIX-08: hydration_pass (RMS 0.74, Δrise 0.03, Δt½ 0.42)
+- MIX-15: hydration_pass (RMS 0.46, Δrise 0.13, Δt½ 1.83)
+- MIX-14: hydration_fail (RMS 1.81, **0.01°F over threshold** —
+  borderline; Sprint 5 routing per the rule but record borderline status
+  for Sprint 5's reference)
+
+**Stage 2 — construction-parameter diff.** Tabulated all 39 non-array
+fields across `CWConstruction`, `CWGeometry`, `CWEnvironment` for
+Reference (5) + hydration-pass survivors (3). Result: exactly **one
+field varies** anywhere in the 8-mix slice.
+
+| Field | Reference | MIX-04 | MIX-08 | MIX-15 |
+|---|---|---|---|---|
+| `construction.placement_temp_F` | 60 | 60 | 60 | **45** |
+
+All other 38 fields are identical: 40×60×8ft footing, 2026/7/15 @ 5am,
+Austin lat/lon, Steel/Red/Limestone construction, 0.65/0.88
+absorptivity/emissivity, 5.67 R-blanket, 5.0/0.7 soil, identical hourly
+weather arrays. The dataset is a designed factorial isolating mix-design
+and (one case) placement temperature.
+
+### §7.5.3 Sprint 4 evaluation-set partitioning (decided pre-PR 13)
+
+Driven by §7.5 findings:
+
+- **Reference set** (5 mixes — Sprint 4 calibration anchor):
+  MIX-01, 02, 03, 11, 12. All 39.1% SCM, 60°F placement, S0 5/5.
+- **B1 — composition-isolated thermal physics** (2 mixes):
+  MIX-04 (21.7% SCM) and MIX-08 (17.4% SCM). Construction byte-identical
+  to Reference; only mix-design differs. Hydration tracks in [12, 36]hr.
+  Round-1 S0 failures: under-predict Peak Max (−1.5/−1.4°F), under-
+  predict Peak Gradient (−2.5/−3.6°F), high Corner RMS (3.03/4.05°F).
+  Same direction both mixes — real physics signature.
+- **B2 — placement-temperature-isolated boundary physics** (1 mix):
+  MIX-15. Same 39.1% SCM and construction as Reference except 45°F
+  placement (vs 60°F). Hydration cleanest of any Cluster B candidate
+  (RMS 0.46°F). Round-1 S0 failures: PeakMax −3.0, PeakGrad −8.3
+  (off-charts vs Sprint 0–3 priors), Field 4.06.
+- **Cluster A — Sprint 5 routed** (5 mixes — high-SCM hydration
+  mismatch): MIX-05, 06, 07, 09, 10. Monotone Peak Max Δ with SCM%.
+  Engine's single-peak α(t_e) cannot capture deferred kinetics of
+  slag/high-fly-ash binders. Confirms R3 empirically.
+- **Sprint 5 routed (borderline)** (1 mix): MIX-14. Failed hydration
+  screen by 0.01°F. Threshold-touching; Sprint 5 should expect easy
+  recovery once dual-peak hydration lands.
+- **Deferred** (1 mix): MIX-13. No CW output; awaits re-export.
+
+**Sprint 4 evaluation set: 8 mixes** (Reference 5 + B1 2 + B2 1).
+Sprint 5 inherits 6 mixes (Cluster A 5 + MIX-14). MIX-13 deferred.
+
+### §7.5.4 Pre-existing issues surfaced (not Sprint 4 scope)
+
+Round 1 noted three quirks in `compare_to_cw.py`. Routed:
+
+- **Hardcoded PNG path** at `compare_to_cw.py:437`
+  (`cw_comparison_MIX-01.png`) overwritten on every run. **Fix in
+  PR 13** as part of `run_one()` refactor.
+- **Hardcoded MIX-01 peak-time constants** at `compare_to_cw.py:41` and
+  `:43` (`CW_PEAK_MAX_T_HR`, `CW_PEAK_GRAD_T_HR`). Used as display
+  values in print statements at lines 257/259. Causes silently-wrong
+  CW peak-time labels on non-MIX-01 mixes (deltas and pass/fail values
+  unaffected, computed from runtime CW data). **Fix in PR 13.**
+- **`RuntimeWarning: invalid value encountered in divide`** at
+  `thermal_engine_2d.py:1619` and `:1624` on first invocation
+  (conductivity averaging). Tracked as R7 (§4), Sprint 6 cleanup.
+  **NOT fixed in PR 13** — would break PR 13's bit-identical regression
+  contract. Suppress at `run_all.py`'s stderr-parse layer if noisy.
 
 ---
 
