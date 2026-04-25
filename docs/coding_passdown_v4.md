@@ -679,6 +679,155 @@ Round 1 noted three quirks in `compare_to_cw.py`. Routed:
 
 ---
 
+## §7.6 PR 13 + 14 closeout — population characterization committed
+
+PR 13 (`67a3ebb` → tag `pr-13-complete`) lifted `compare_to_cw.py:main()`
+into `run_one()` (Approach A), added `run_all.py` multi-mix driver, and
+fixed three §7.5.4 display issues (hardcoded MIX-01 peak-time constants,
+hardcoded PNG path, lack of MIX-13 sentinel handling). Bit-identical
+regression on MIX-01 PASS, full suite 115/115. PR 14 (this commit) ran
+the full 14-mix evaluable set through `run_all.py` and committed the
+result to `validation/sprint4_baseline.md`. Population characterization
+is now in committed form; §7.5 reconnaissance is durably promoted to
+production evidence.
+
+### §7.6.1 Reconnaissance vs production reconciliation
+
+Round-1 spike (subprocess + parser) → PR 14 in-process → numbers should
+be identical at the engine level. Confirmed:
+
+| Mix   | Spike S0 | PR 14 S0 | Largest metric drift |
+|-------|----------|----------|----------------------|
+| MIX-01 | 5/5     | 5/5      | 0.00 (same in-process engine path) |
+| MIX-02 | 5/5     | 5/5      | 0.00 |
+| MIX-03 | 5/5     | 5/5      | 0.00 |
+| MIX-04 | 2/5     | 2/5      | 0.05 (PeakGrad: −2.45 vs spike −2.5; 1-decimal rounding) |
+| MIX-05 | 4/5     | 4/5      | 0.00 |
+| MIX-06 | 1/5     | 1/5      | 0.05 (PeakGrad: +2.85 vs spike +2.9; 1-decimal rounding) |
+| MIX-07 | 1/5     | 1/5      | 0.03 (PeakGrad: +4.77 vs spike +4.8) |
+| MIX-08 | 2/5     | 2/5      | 0.03 (PeakMax: −1.43 vs §7.5.3 ref −1.4) |
+| MIX-09 | 1/5     | 1/5      | 0.02 (PeakMax: +3.78 vs spike +3.8) |
+| MIX-10 | 4/5     | 4/5      | 0.00 |
+| MIX-11 | 5/5     | 5/5      | 0.00 |
+| MIX-12 | 5/5     | 5/5      | 0.00 |
+| MIX-13 | skipped | skipped  | n/a (no CW output)   |
+| MIX-14 | 0/5     | 0/5      | 0.01 (PeakMax: +1.49 vs spike +1.5) |
+| MIX-15 | 1/5     | 1/5      | 0.05 (PeakGrad: −8.25 vs spike −8.3; 1-decimal rounding) |
+
+(Largest drift is the maximum absolute difference across the 5 metrics —
+reported in °F. §7.5.1 reported failure values rounded to 1 decimal
+place; all non-zero drift values are attributable to that rounding.
+Subprocess and in-process are byte-equivalent paths through the same
+`run_one()` body, confirmed.)
+
+### §7.6.2 Sprint 4 evaluation set: production-confirmed
+
+8 mixes, partitioning per §7.5.3:
+
+- **Reference (5/5 each)**: MIX-01, 02, 03, 11, 12. 39.1% SCM, 60°F
+  placement.
+- **B1 (2/5 each)**: MIX-04 (21.7% SCM), MIX-08 (17.4% SCM). 60°F
+  placement, mid/low SCM. Hydration tracks.
+- **B2 (1/5)**: MIX-15. 39.1% SCM, 45°F placement (only mix with cold
+  placement). Hydration tracks.
+
+5/8 evaluation set passes S0 today. 3/8 are PR 15/16 calibration
+targets.
+
+### §7.6.3 PR 15 hypothesis worksheet (B1 — composition-isolated thermal physics)
+
+MIX-04 and MIX-08 share signature: under-predict Peak Max (−1.5°F,
+−1.4°F), under-predict Peak Gradient (−2.5°F, −3.6°F), high Corner RMS
+(3.03°F, 4.05°F). Same direction, both mixes. Engine is *under-cooling*
+the form face for low/mid SCM mixes; equivalently, real concrete is
+hotter at the form than the engine predicts.
+
+Per §6.3, PR 15 starts with diagnostic scripts before any fix is coded.
+Hypotheses to falsify, in order of cheapness:
+
+**H1 — F_vert calibration is composition-dependent.** F_VERT_BY_ORIENTATION
+["unknown"]=0.15 was MIX-01 calibrated (Sprint 2 PR 8). Sprint 2 sweep
+showed F_vert was a low-sensitivity knob on MIX-01 (0.36°F Corner RMS
+across full 0.0–0.5 sweep), but composition might shift sensitivity.
+Diagnostic: F_vert sweep on MIX-04 and MIX-08, same anchor-inject
+pattern as Sprint 3's soil sweep. Look for monotone authority and
+which value (if any) drives B1 to S0 PASS.
+
+**H2 — R_form is composition-dependent.** ADR-04 fixed R_form at 0.0862
+m²·K/W as physical contact resistance for steel form + wet concrete
+film per ACI 347. ACI 347's value derivation assumes a specific
+mix-design context; low/mid SCM might have different film thermal
+behavior. Diagnostic: R_form sweep on MIX-04 and MIX-08 across
+0.04–0.20. Look for monotone authority. Compare swept curves between
+MIX-04, MIX-08, and MIX-01 to determine if R_form has different
+optimal values for different SCM.
+
+**H3 — Some boundary heat-flux term scales with mix composition we
+don't capture.** Catch-all hypothesis if H1 and H2 don't fit.
+Diagnostics: which gate fails first as F_vert or R_form moves toward
+B1's optimum? If Corner RMS drops but Peak Max stays off, the
+boundary-physics fix is partial; rest is something else (hydration
+peak shape, internal energy balance, etc.).
+
+PR 15 prompt picks one hypothesis to investigate first based on which
+diagnostic is cheapest (likely H1 — F_vert sweep is one anchor-inject,
+no engine code change). Stop conditions per §6.6 are mandatory in PR
+15's prompt.
+
+### §7.6.4 PR 16 hypothesis worksheet (B2 — placement-temperature-isolated boundary physics)
+
+MIX-15: PeakMax −3.0°F, PeakGrad −8.3°F, Field RMS 4.06°F. Failure
+direction (under-prediction of peak and gradient) is *same* as B1, but
+magnitude is much larger. The −8.3°F PeakGrad is off-charts vs Sprint
+0–3 experience (Sprint 2 close had ±0.3°F gradient delta on MIX-01).
+The shared B1/B2 failure direction is a hint: whatever B1 fix does, it
+might partially fix B2 too — but B2's magnitude says there's also a
+cold-placement-specific effect.
+
+Hypotheses (parallel structure to §7.6.3, run after PR 15 closes so we
+know whether B1's fix moves MIX-15 too):
+
+**H4 — Initial-condition-dependent boundary term.** Some boundary flux
+coefficient is evaluated at placement temperature rather than current
+temperature. At T₀=45°F vs T_amb_min=74.6°F, |T₀ − T_amb| = ~30°F is
+much larger than MIX-01's ~15°F gap. If a flux term sees the wrong
+temperature in its setup, the cold-placement case amplifies the bias.
+Diagnostic: grep `compare_to_cw.py`, `thermal_engine_2d.py`,
+`cw_scenario_loader.py` for any usage of `placement_temp_F` or
+`T_initial`/`T_0` outside of grid initialization. Each occurrence is a
+candidate.
+
+**H5 — Cold-placement-specific physics not modeled.** Latent heat from
+condensation when cold concrete pulls air moisture, accelerated
+hydration heat from larger temperature gradient, etc. Diagnostic: this
+is genuine physics work — read `Riding 2007` (Schindler-Riding
+hydration model PhD) and ACI 207.2R cold-weather sections to identify
+candidate phenomena. Probably out of Sprint 4 scope, document for
+Sprint 5/6 routing.
+
+**H6 — IC propagation issue.** The engine's initial uniform-T₀ field
+might handle the boundary energy flux differently when |T₀ − T_amb|
+is large. Diagnostic: run engine on a synthetic MIX-15-like scenario
+with T₀=60°F (matching Reference) but otherwise MIX-15 inputs. If
+output looks like Reference, the IC is the trigger; if it looks like
+MIX-15, the trigger is something else in MIX-15.
+
+PR 16 prompt sequenced after PR 15 lands so B1 fix's MIX-15 effect is
+known.
+
+### §7.6.5 Sprint 4 close criteria — confirmed
+
+Per §3 Sprint 4 sub-section, unchanged after PR 14:
+
+- **Floor**: PR 13 + 14 land (DONE), Reference 5/5 holds (CONFIRMED),
+  R4 decided (PR 17 outstanding), PR 15 lands fixing B1 or routing.
+- **Target**: B1 + B2 both S0 PASS, R4 cleaned, evaluation set 8/8 S0.
+- **Stretch**: B1 + B2 hit S1-aspire on Center + Corner RMS.
+
+PR 15 opens next, fresh session per §6.7.
+
+---
+
 ## §8 Sprint 4+ retrospectives
 
 (Populated as sprints close.)
