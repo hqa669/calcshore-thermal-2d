@@ -288,6 +288,7 @@ and a status (open / mitigated / accepted).
 | R6 | Engine tested on half-mat geometry only; behavior on full-mat, slab, or column geometries unvalidated | Sprint 6+ | Open |
 | R7 | Cosmetic RuntimeWarning at harmonic-mean k-divide masks potential future numerical issues | Sprint 6 | Mitigated via np.where guard; cleanup deferred |
 | R8 | Hydration model uses CW's parameters (τ, β, α_u, Ea, Hu) directly; if those parameters are miscalibrated in CW, our engine inherits the error | Sprint 4–5 | Accepted (inherited by design) |
+| R9 | Engine and CW diverge on Arrhenius rate factor at concrete temperatures above ~30°C. Source unknown — possibly different effective Ea, different reference temperature, or a CW-side rate cap not present in engine. Affects cold-placed mixes amplified by sustained high-T residence. MIX-15 −3°F PeakMax deficit traced to this divergence per PR 16 Phase 2.6. Mode A (small early calibration drift, ≤1.7°F, both mixes) is separate and non-blocking. Mode B (late-time divergence, cold-placed mixes only) is the unresolved item. | Sprint 5 if hydration-kinetics-aligned; Sprint 6 if inherited-calibration cleanup | Open |
 
 ---
 
@@ -797,55 +798,98 @@ and default R_form=0.0862. No stop condition triggered.
 
 ### §7.6.4 PR 16 hypothesis worksheet (B2 — placement-temperature-isolated boundary physics)
 
-MIX-15: PeakMax −3.0°F, PeakGrad −8.3°F, Field RMS 4.06°F. Failure
-direction (under-prediction of peak and gradient) is *same* as B1, but
-magnitude is much larger. The −8.3°F PeakGrad is off-charts vs Sprint
-0–3 experience (Sprint 2 close had ±0.3°F gradient delta on MIX-01).
-The shared B1/B2 failure direction is a hint: whatever B1 fix does, it
-might partially fix B2 too — but B2's magnitude says there's also a
-cold-placement-specific effect.
+**PR 16 finding — diagnostic-only close, Decision G.**
 
-Hypotheses (parallel structure to §7.6.3, run after PR 15 closes so we
-know whether B1's fix moves MIX-15 too):
+**V2 (verification) — MIX-15 and MIX-01 share bit-identical mix designs.**
+All 10 mix-design fields identical to 4+ decimal places; placement_temp_F
+is the only varying field across all 38 construction parameters (§7.5.2
+confirmed, now strengthened). The CW dataset is a purer factorial than
+originally indicated.
 
-**H4 — Initial-condition-dependent boundary term.** Some boundary flux
-coefficient is evaluated at placement temperature rather than current
-temperature. At T₀=45°F vs T_amb_min=74.6°F, |T₀ − T_amb| = ~30°F is
-much larger than MIX-01's ~15°F gap. If a flux term sees the wrong
-temperature in its setup, the cold-placement case amplifies the bias.
-Diagnostic: grep `compare_to_cw.py`, `thermal_engine_2d.py`,
-`cw_scenario_loader.py` for any usage of `placement_temp_F` or
-`T_initial`/`T_0` outside of grid initialization. Each occurrence is a
-candidate.
+**Phase 1 ablation — MARGINAL boundary-physics authority.** F_vert sweep
+(9 values): MIX-15 PeakMax Δ range = 0.41°F (below the 0.50°F authority
+threshold). R_form sweep (7 values): PeakMax Δ range = 0.08°F (invariant).
+FieldRMS and CenterRMS: 0.00°F variation across both sweeps — completely
+boundary-physics-invariant. MIX-01 held 5/5 at defaults (gate passed).
+Full sweep data: `validation/diagnostics/pr16_b2_ablation.md`.
 
-**H5 — Cold-placement-specific physics not modeled.** Latent heat from
-condensation when cold concrete pulls air moisture, accelerated
-hydration heat from larger temperature gradient, etc. Diagnostic: this
-is genuine physics work — read `Riding 2007` (Schindler-Riding
-hydration model PhD) and ACI 207.2R cold-weather sections to identify
-candidate phenomena. Probably out of Sprint 4 scope, document for
-Sprint 5/6 routing.
+**H6 (two-tier) — cold-IC confirmed as trigger; blanket-pin ruled out.**
+- H6a (warm IC override: placement_temp_F=60°F, compare to MIX-01 CW):
+  S0 5/5, PeakMax Δ −0.29°F, FieldRMS 0.88°F, CenterRMS 0.74°F. Perfect
+  Reference-level match. Cold IC confirmed as the causal trigger.
+- H6b (cold IC, blanket pin patched to track T_amb, compare to MIX-15 CW):
+  Results bit-identical to baseline (S0 1/5 unchanged). The blanket-cell
+  pin (lines 2085, 2088) is physically inert — k_cell[grid.is_blanket]=0.0
+  at line 1438 thermally decouples blanket cells from the concrete stencil.
+  V3 counter confirmed 16,464 patch executions with zero concrete-metric
+  change.
+- **Blanket-cell pin is NOT a Sprint 6 cleanup item.** The air-cell pin
+  at line 2085 is load-bearing (placeholder rho_cp=1; do not change).
+  The blanket pin at line 2088 is cosmetically misleading but physically
+  harmless. Do not conflate the two.
+- H6 artifacts: `validation/diagnostics/pr16_h6_ic_test.md`.
 
-**H6 — IC propagation issue.** The engine's initial uniform-T₀ field
-might handle the boundary energy flux differently when |T₀ − T_amb|
-is large. Diagnostic: run engine on a synthetic MIX-15-like scenario
-with T₀=60°F (matching Reference) but otherwise MIX-15 inputs. If
-output looks like Reference, the IC is the trigger; if it looks like
-MIX-15, the trigger is something else in MIX-15.
+**H4 (grep audit) — code-misuse hypothesis falsified.** Grep for
+placement_temp_F / T_initial / T0_C across three production files found
+zero non-trivial, non-blanket, non-air candidates in the concrete physics
+path. T_initial_C is never re-read mid-simulation for concrete cells.
+The only post-initialization use (line 1415, initial Cp seeding at α=0)
+is overwritten on the first iteration. H4-class bugs ruled out.
+Audit: `validation/diagnostics/pr16_h4_audit.md`.
 
-PR 16 prompt sequenced after PR 15 lands so B1 fix's MIX-15 effect is
-known.
+**Phase 2.6 (equivalent-age trajectory comparison) — two-mode divergence.**
+Engine vs CW centerline temperature trajectories (mid-depth) for MIX-01
+and MIX-15 compared against CW-implied te/α (engine's Arrhenius model
+applied to CW temperature trajectory):
 
-### §7.6.5 Sprint 4 close criteria — confirmed
+- **Mode A** (both mixes): Engine runs +1.0–1.7°F warmer than CW during
+  active hydration (t=8–48 hr). Small calibration drift in early heat
+  generation. MIX-01 still passes S0 (PeakMax Δ −0.29°F). Not blocking.
+- **Mode B** (MIX-15 only): After a crossover at t≈55–60 hr (concrete
+  temperature ~88–93°F ≈ 31–34°C, just above T_REF=23°C), the engine
+  progressively under-predicts CW. Δte crosses zero at t≈72 hr and
+  reaches −7.6 hr by t=168 hr; ΔT reaches −3.04°F. Engine loses
+  equivalent-age vs CW after the crossover, consistent with a divergence
+  in the Arrhenius rate factor at concrete temperatures above ~30°C.
 
-Per §3 Sprint 4 sub-section, unchanged after PR 14:
+Mode B is distinct from Sprint 5's dual-peak hydration scope (which
+targets the early-window two-peak structure for high-SCM mixes). Mode B
+is a temperature-dependent rate calibration mismatch above ~30°C,
+amplified in cold-placed mixes because their temperature curve spends
+more time in the high-rate regime during the late-time peak.
+**Routed to R9.**
+Trajectory data: `validation/diagnostics/pr16_te_alpha_comparison.md`.
+
+Original hypothesis dispositions:
+**H4 — IC-dependent boundary term.** FALSIFIED. No placement_temp_F /
+T_initial code-misuse found in the concrete physics path. See H4 audit.
+**H5 — Cold-placement-specific physics not modeled.** PARTIALLY SUPPORTED.
+Phase 2.6 Mode B divergence is consistent with H5's "calibration artifact
+for cold-placed concrete" sub-hypothesis. Routed to R9 for Sprint 5/6.
+**H6 — IC propagation issue.** CONFIRMED as causal (H6a); MECHANISM
+REFINED by H6b (blanket is not the mechanism) and Phase 2.6 (Arrhenius
+rate divergence above ~30°C is the root, not a single IC-pinned code term).
+
+### §7.6.5 Sprint 4 close criteria — recalibrated after PR 16
+
+Updated after PR 15 (Decision D) and PR 16 (Decision G):
 
 - **Floor**: PR 13 + 14 land (DONE), Reference 5/5 holds (CONFIRMED),
-  R4 decided (PR 17 outstanding), PR 15 lands fixing B1 or routing.
-- **Target**: B1 + B2 both S0 PASS, R4 cleaned, evaluation set 8/8 S0.
-- **Stretch**: B1 + B2 hit S1-aspire on Center + Corner RMS.
+  R4 decided (DONE via PR 17 plan), PR 15 lands (DONE, Decision D —
+  B1 routed to Sprint 5), PR 16 lands (DONE, Decision G — B2 routed
+  to R9 with traced mechanism).
+- **Target (recalibrated)**: Original target "B1 + B2 both S0 PASS after
+  PR 15/16" is replaced. B1 routes to Sprint 5 dual-peak hydration scope.
+  B2 routes to R9 (Arrhenius rate divergence above ~30°C). Sprint 4
+  target is now: R4 cleaned (PR 17), mechanisms for B1 and B2 traced and
+  documented with diagnostic evidence. Evaluation set 8/8 S0 deferred to
+  Sprint 5/6 pending R9 resolution and Sprint 5 dual-peak work.
+- **Stretch**: Unchanged — B1 + B2 S1-aspire on Center + Corner RMS, if
+  R9 and Sprint 5 hydration fixes land cleanly.
 
-PR 15 opens next, fresh session per §6.7.
+Sprint 4 formal close: when PR 17 lands (R4 disposition) and this doc is
+tagged `sprint-4-complete`. PR 16 closes diagnostic-only with mechanisms
+traced and routed. Sprint 5 scope grows by one item (R9).
 
 ---
 
