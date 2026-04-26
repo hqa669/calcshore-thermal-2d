@@ -243,32 +243,156 @@ R8 (CW hydration parameter inheritance) — accepted-by-design.
   `pr-17-complete`, `sprint-4-complete`. Per §6.8 (new Sprint 3 lesson),
   verify each tag exists locally before trusting Claude Code's report.
 
-### Sprint 5 — Dual-peak hydration model (~4–6 weeks)
+### Sprint 5 — Reference-set residual characterization (~3–5 weeks)
 
-The deferred first-48hr shape divergence identified in Sprint 2. Current
-single-peak α(t_e) Arrhenius-weighted model cannot capture CW's likely
-two-peak profile (initial wetting peak + acceleration peak).
+Updated 2026-04-25 from "dual-peak hydration model" based on Sprint 4
+findings. The dual-peak hydration work has been routed to a separate
+hydration sprint series (see "Explicit deferrals" below), and Sprint 5
+takes on a narrower, characterization-first scope on the Reference set
+that closed Sprint 4 at S0 5/5 but only S1-aspire 3/5.
 
-Scope candidates:
-- Expand hydration model parameterization to support two peaks
-- Implement dormant-period onset delay
-- Rate-function selection (Schindler vs exponential vs other)
-- Re-validate against MIX-01 first, then the 15-mix library
+**Theme**: Reference-set residual characterization — distinguish
+thermal-physics terms from inherited kinetics drift before deciding on
+a fix. Sprint 5 is characterization-first, fix-conditional.
 
-Blocker from Sprint 3 perspective: we need a validated multi-mix
-baseline (Sprint 4 deliverable) before investing in a hydration model
-upgrade, else we risk overfitting to MIX-01 again.
+**Evaluation set (5 mixes)**: Reference (MIX-01, 02, 03, 11, 12). All
+39.1% SCM, 60°F placement, all S0 5/5 at sprint-4-complete, all 3/5
+S1-aspire (Centerline RMS ✗ on 5/5; Corner RMS ✗ on 4/5).
 
-### Sprint 6 — Production robustness (~3–4 weeks)
+**Two investigations**:
 
-- Suppress cosmetic RuntimeWarning at harmonic-mean k-divide
-- Parameterize R_form by form material (steel/plywood/plastic liner)
-  via new CWConstruction.form_type fields
-- Form orientation parsing from CW .dat files if CW stores it
-- Error handling and input validation for customer-facing use
-- Performance optimization if runtime becomes concern
-- API cleanup and customer documentation
-- Engine v3 release
+1. **Centerline RMS systematic offset** (~0.74°F across all 5 Reference
+   mixes; MIX-02 outlier at 0.57°F). Systematic across diverse mix
+   designs but identical construction → likely a thermal-physics term
+   or shared kinetics drift, not mix-specific calibration.
+2. **Corner RMS calibration**. PR 15 found R_form has clean authority
+   on Corner RMS within Reference's tolerance window; R_form = 0.060
+   looked promising. Sprint 5 evaluates this on the full Reference set.
+
+#### PR sequence (provisional, characterization-first)
+
+- **PR 18 — Reconnaissance spike for Investigation 1**. Characterize
+  what kind of error the Centerline RMS residual is *before* any code
+  change. Diagnostic candidate set:
+    - Constant offset (engine vs CW differ by a near-constant ΔT
+      throughout the steady-state window)
+    - Phase lag (engine and CW have similar amplitude but offset in time)
+    - Amplitude scaling (engine's diurnal swing larger or smaller than
+      CW's)
+    - Depth-localization (residual concentrated at specific depths
+      rather than uniform)
+    - **Mode-A overlap** (does the Reference centerline residual share
+      the same time/temperature signature as PR 16 Phase 2.6 Mode A —
+      engine warmer than CW during active hydration, t = 8–48 hr? If
+      yes, Sprint 5's centerline work partially characterizes R9's
+      Mode A — it strengthens R9 routing, doesn't replace it.)
+  Spike outputs go to `validation/diagnostics/pr18_centerline_recon/`.
+  Not committed to engine source. Per §6.3 (diagnostic-script-before-
+  fix) and §7's "run the parameter sweep before narrating physics"
+  lesson generalized.
+
+- **PR 19 — Investigation 1 fix (conditional)**. Land if PR 18 finds
+  a thermal-physics term with sufficient authority on Centerline RMS
+  (≥0.24°F on Reference if S1-aspire 0.5°F closure is the goal, or a
+  proportionate target if PR 18 reframes the goal). Skip and route to
+  engine v3 release notes as a known limitation if PR 18 finds the
+  residual is dominated by inherited kinetics drift (R9 Mode A
+  overlap) — that path keeps Sprint 5 disciplined and routes the
+  mechanism cleanly.
+
+- **PR 20 — Investigation 2**. R_form Reference-set evaluation. PR 15
+  found R_form=0.060 brings B1 to 4/5 with MIX-01 holding 5/5; PR 20
+  evaluates the full Reference set at R_form=0.060 vs the 0.0862
+  baseline. Commit conditional on Reference set holding S0 5/5 at
+  the new value AND ≥3/5 mixes improving on Corner RMS without
+  Centerline degradation. Updates ADR-04 if landed.
+
+- **PR 21 — Sprint 5 close + retrospective**. Sprint roadmap update
+  reflecting post-recon Sprint 5 disposition; §8 Sprint 5
+  retrospective; tag `sprint-5-complete`. Mirrors PR 17's role in
+  Sprint 4.
+
+#### Sprint 5 close criteria
+
+- **Floor**: PR 18 lands characterizing the centerline + corner
+  residual mechanisms. R_form recalibration committed if PR 20's
+  Reference-set evaluation confirms PR 15's finding (or routed to
+  engine v3 release notes if it doesn't). §3 roadmap updated to
+  reflect post-recon Sprint 5 scope.
+- **Target**: Reference set residuals improve on ≥3/5 mixes for
+  Centerline AND Corner. Engine v3 ships with documented residuals.
+- **Stretch**: Reference set hits S1-aspire 5/5 on all 5 metrics for
+  all 5 mixes.
+
+#### Open risks (see §4)
+
+R5 (R_form form material parameterization) — Sprint 6 still.
+R7 (RuntimeWarning cleanup) — Sprint 6 still.
+R9 (Arrhenius rate factor divergence above ~30°C) — open; Sprint 5
+PR 18 may strengthen routing via Mode-A overlap test but does not
+own R9's resolution.
+
+#### Tag plan
+
+`pr-18-complete`, `pr-19-complete` (if landed), `pr-20-complete`
+(if landed), `pr-21-complete`, `sprint-5-complete`. Per §6.8 and
+§6.9, all tags are local until user pushes; verify locally before
+reporting done.
+
+### Sprint 6 — Cleanup + engine v3 release (~3–4 weeks)
+
+Final sprint of the thermal sprint series. Closes the series with
+engine v3 as the deliverable.
+
+**Theme**: production-readiness cleanup on the validated Reference-set
+baseline.
+
+**Scope**:
+- R5: parameterize R_form by form material
+  (steel/plywood/plastic-liner) via new `CWConstruction.form_type`
+  field. Steel value carries forward from Sprint 5's chosen
+  R_form (whether 0.0862 or 0.060). Plywood and plastic-liner values
+  from ACI 347 / contact-resistance literature; not validated against
+  CW (no exports for those forms in the current 14-mix library).
+- R7: suppress cosmetic `RuntimeWarning: invalid value encountered in
+  divide` at harmonic-mean k-divide (`thermal_engine_2d.py:1619, 1624`).
+  Currently mitigated via `np.where` guard; cleanup is removing the
+  pre-guard divide pattern.
+- Engine v3 release: API cleanup, customer-facing docstrings,
+  documented Reference-set validation envelope (S0 tolerances on
+  half-mat 40×60×8ft footing, Austin summer, mid-SCM at 60°F
+  placement, steel form), explicitly-listed known residuals
+  (Centerline RMS, R9 Mode B), explicitly-listed out-of-envelope
+  conditions (cold placement, high-SCM mixes, non-half-mat geometry,
+  non-Austin climate).
+- Tag `sprint-6-complete` and `engine-v3` on the same commit.
+
+#### Sprint 6 close criteria
+
+- **Floor**: R5 lands; R7 lands; engine v3 release notes
+  document the validated envelope and known residuals.
+- **Target**: Floor + customer-facing API documented.
+
+### Explicit deferrals (separate sprint series, not bundled into thermal sprints)
+
+These are tracked here so they don't get mistakenly pulled back into
+Sprint 5 or Sprint 6 scope. Each is a separate future sprint series,
+not a single sprint.
+
+- **Hydration sprint series** — dual-peak hydration model, Cluster A
+  recovery (MIX-05, 06, 07, 09, 10), MIX-14 borderline recovery, and
+  R9 disambiguation/closure. The deferred first-48hr shape divergence
+  identified in Sprint 2 lives here. R3 (accepted, deferred) belongs
+  to this series. R8 (CW parameter inheritance) is the inherited-
+  calibration adjacent risk. R9 (Arrhenius rate factor divergence
+  above ~30°C) routes here if disambiguation lands as kinetics-aligned.
+- **Geometry coverage series** — full-mat, slab, column, and other
+  non-half-mat geometries. R6 belongs to this series.
+- **Multi-climate validation series** — non-Austin sites, cold-climate
+  exports, R2 (F_VERT_BY_ORIENTATION non-"unknown" values) testable
+  here once non-"unknown" form orientations appear in a CW library.
+
+The thermal sprint series ends at `sprint-6-complete` / `engine-v3`.
 
 ---
 
@@ -338,6 +462,23 @@ gate.
 - Sprint 3: upgraded to simplified Barber (sinusoidal lag + damping); defaults `soil_lag_hrs=5.0`, `soil_damping=0.7`
 - **Sprint 4 PR 17**: defaults reverted to `soil_lag_hrs=0.0`, `soil_damping=1.0` (no-op pair; reduces to T_amb behavior). Helper code retained per R4 disposition. Empirical justification: §7.5.2 confirms 14-mix library has zero climate variation (all TX Austin); Sprint 3 sweep on MIX-01 showed lag dominates Corner RMS sensitivity (~0.03°F/hr) and damping is unidentifiable (<0.01°F authority). Without identifiability data across climates, defaults that introduce phase offset degrade fit monotonically. The helper remains a latent capability for future cold-climate exports where diurnal ground-air differentials become identifiable.
 - Full Barber 1957 diffusion model available as a follow-on if future cold-climate data shows simplified Barber is insufficient.
+
+**ADR-09 (Sprint 4 close, established by §7.5/§7.6 work)**: Mixes are
+admitted to a thermal-validation evaluation set via an early-window
+hydration-fit screen on the [12, 36]hr window — Centerline RMS, Δ peak
+rise rate, and Δ time-to-half-peak, with thresholds derived from the
+sprint's Reference set at 1.5× worst-case (§7.5.2 records the protocol
+and the thresholds used in Sprint 4: 1.80°F, 0.20°F/hr, 2.13 hr). Mixes
+that fail the screen are routed out of the active sprint's evaluation
+set, not bundled into thermal-physics calibration work. The screen is a
+methodology rule about *which mixes are admitted*, not a categorical
+claim about *which physics terms are thermal vs hydration* — that
+distinction is for diagnostics to determine on a finding-by-finding
+basis (PR 16's Phase 2.6 Mode-A drift on a screen-passing mix is the
+canonical example of why the rule is admission-shaped, not term-shaped).
+Future thermal sprints reuse this screen; the Reference set carried
+into a sprint may change, in which case the 1.5× worst-case thresholds
+recompute against that sprint's Reference set.
 
 ---
 
@@ -450,6 +591,46 @@ If the local check fails, the tag was never created — re-run the tag
 step explicitly. Sprint 4 will tag pr-13-complete, pr-14-complete,
 pr-15-complete, pr-16-complete, pr-17-complete, sprint-4-complete (six
 tag sites; six places to bite).
+
+### §6.9 Manual push and tag discipline (Sprint 5+)
+
+Claude Code commits and creates local tags. Claude Code does *not* push
+branches or tags to remote. The user pushes manually after reviewing
+the local commit and any test/diff output Claude Code reports.
+
+Workflow per PR:
+
+1. Claude Code: implement scope, run gates, commit on a dedicated
+   branch, create local tag(s).
+2. Claude Code: report branch name, commit SHA, gate results, anything
+   notable in the diff. Stop.
+3. User: review the diff locally (`git show <SHA>`) or on GitHub after
+   pushing the branch alone (`git push -u origin <branch>` without the
+   tag). User verifies the change matches the prompt's scope.
+4. User: if review passes, push the tag (`git push origin <tag>`). If
+   review fails, decide whether to amend, scope-cut, or retry; tag does
+   not get pushed for an unreviewed commit.
+5. User: §6.8 verification (`git tag -l <tag>` AND
+   `git ls-remote --tags origin <tag>`).
+6. User: merge to main if the PR is sprint-PR-shape
+   (`git checkout main && git merge --ff-only <branch> && git push origin main`).
+
+**Why**: the human review checkpoint between commit and push is a
+safety gate. Claude Code's gate-passing is necessary but not sufficient
+— the diff itself can contain scope creep, missed edge cases, or test
+fixtures that look right but were generated against the wrong reference
+(caught on PR 13's MIX-01 baseline JSON spot-review). Human review
+catches these before the tag becomes durable.
+
+Sprint 4 lesson: this discipline emerged from Claude Code's SSH
+constraints in the sandbox environment, but the discipline is valuable
+independent of SSH. Sprint 5 onward adopts it as default practice.
+
+Claude Code prompts should reflect this:
+- Specify "commit + create local tag, do **NOT** push" explicitly.
+- Report SHA + tag name + gate output for user review.
+- Skip the §6.8 verification step in the prompt itself (user runs it
+  post-push).
 
 ---
 
@@ -885,7 +1066,249 @@ Sprint 4 produced two genuinely new mechanism-level findings (B1 boundary-physic
 
 ## §8 Sprint 4+ retrospectives
 
-(Populated as sprints close.)
+### §8.1 Sprint 4 retrospective
+
+Sprint 4 closed 2026-04-25 at tag `sprint-4-complete` (commit 5596c92).
+Five PRs landed across the sprint: PR 13 (run_one() refactor +
+display fixes), PR 14 (baseline data commit), PR 15 (B1 ablation
+sweeps), PR 16 (B2 ablation + IC test + Phase 2.6 trajectory
+comparison), PR 17 (R4 disposition + sprint close).
+
+The sprint planned as a "calibration sprint" (B1 + B2 close to S0)
+and shipped as a "characterization sprint" (B1 + B2 mechanism-traced
+and routed). The structural shift is the dominant story of the
+sprint and the reason the close criteria were recalibrated mid-flight.
+
+#### Deliverables
+
+- `compare_to_cw.py` refactored: `main()` body lifted into
+  `run_one(scenario_dir) -> dict`; `print_gate_table(result)` separated;
+  hardcoded MIX-01 peak-time constants (lines 41/43) replaced with
+  per-scenario extraction; hardcoded PNG path (line 437)
+  parameterized.
+- `run_all.py` multi-mix driver added (PR 13). Group definitions
+  (`reference`, `b1`, `b2`, `cluster_a`, `evaluation_set`, `all`)
+  static in `GROUPS`, not in dataclasses. PNG-off-by-default. MIX-13
+  sentinel handling (`{"skipped": True, ...}`).
+- `validation/sprint4_baseline.md` committed (PR 14): per-mix gate
+  table for the full 14-mix evaluable set, partitioned by group.
+- `validation/diagnostics/pr15_b1_sweeps.md`: F_vert × R_form sweep
+  data for Reference + B1 (48 sweep points across 6 mixes).
+- `validation/diagnostics/pr16_b2_ablation.md`: F_vert × R_form sweep
+  data for B2.
+- `validation/diagnostics/pr16_h6_ic_test.md`: cold-IC override and
+  blanket-pin patch tests.
+- `validation/diagnostics/pr16_h4_audit.md`: grep audit for IC code-
+  misuse hypotheses across `thermal_engine_2d.py`, `cw_scenario_loader.py`,
+  `compare_to_cw.py`.
+- `validation/diagnostics/pr16_te_alpha_comparison.md`: equivalent-age
+  trajectory comparison (engine vs CW) for MIX-01 and MIX-15 across
+  168 hr, surfacing Mode A and Mode B divergences.
+- ADR-08 updated (PR 17): `soil_lag_hrs=0.0`, `soil_damping=1.0`
+  defaults committed. R4 closed.
+- Tests: 105 → 181 (76 net new across the sprint; PR 13 added the
+  largest tranche covering sentinel handling and parameterized PNG
+  output paths).
+
+#### Sprint 4 close — gate numbers
+
+Reference set (5/5 mixes hold S0 5/5 at sprint-4-complete):
+
+| Mix | PeakMax | PeakGrad | FieldRMS | CenterRMS | CornerRMS | S0 |
+|---|---|---|---|---|---|---|
+| MIX-01 | −0.29°F | −0.45°F | 0.88°F | 0.74°F | 2.26°F | 5/5 |
+| MIX-02 | (Ref) | (Ref) | (Ref) | 0.57°F | (Ref) | 5/5 |
+| MIX-03 | (Ref) | (Ref) | (Ref) | (Ref) | (Ref) | 5/5 |
+| MIX-11 | (Ref) | (Ref) | (Ref) | (Ref) | (Ref) | 5/5 |
+| MIX-12 | (Ref) | (Ref) | (Ref) | (Ref) | (Ref) | 5/5 |
+
+(Reference-set values matching MIX-01 to first decimal indicated as
+"(Ref)"; full per-mix table lives in `validation/sprint4_baseline.md`.)
+
+B1 (MIX-04, MIX-08): S0 2/5 each at sprint-4-complete (unchanged from
+PR 14 baseline; PR 15 closed diagnostic-only — no engine change).
+B2 (MIX-15): S0 1/5 at sprint-4-complete (unchanged from PR 14
+baseline; PR 16 closed diagnostic-only — no engine change).
+
+#### The structural shift: calibration sprint → characterization sprint
+
+PR 15 was scoped as "B1 calibration: pick a knob that closes B1's S0
+gates." PR 15's diagnostic Phase (per §6.3) ran F_vert and R_form
+sweeps before committing to a fix. The sweep finding — **PeakMax Δ
+held at −1.46°F (MIX-04) and −1.43°F (MIX-08) at every sweep point
+across F_vert 0.00–0.50 and R_form 0.040–0.200, no exception** —
+falsified both H1 (F_vert composition-dependent) and H2 (R_form
+composition-dependent) for the binding constraint (PeakMax).
+
+The honest read of that sweep: B1's PeakMax failure is not a
+boundary-physics knob away. It is hydration-heat-generation-driven
+and not closable inside Sprint 4's thermal-physics scope. PR 15
+landed as Decision D (diagnostic-only close) — committed the sweep
+data, did not commit a calibration change, routed B1 PeakMax to a
+hydration sprint.
+
+PR 16 followed the same pattern. Phase 1 ablation: F_vert sweep
+range 0.41°F on PeakMax (below the 0.50°F authority threshold);
+R_form sweep range 0.08°F (invariant). H6a (warm IC override at 60°F)
+recovered Reference-level S0 (5/5, PeakMax Δ −0.29°F) — confirming
+cold IC as the causal trigger but not the *mechanism*. H6b (blanket-pin
+patch) was bit-identical to baseline — falsifying the proposed
+mechanism. Phase 2.6's te/α trajectory comparison surfaced the actual
+mechanism: Mode A small early calibration drift (≤1.7°F, both mixes,
+non-blocking) and Mode B late-time Arrhenius rate divergence above
+~30°C (cold-placed mixes only, MIX-15 −3.04°F). PR 16 landed as
+Decision G (diagnostic-only close), R9 opened.
+
+The sprint shifted, between PR 14 close and PR 15 mid-flight, from
+"close 3 of 8 evaluation-set mixes to S0" to "characterize 3 of 8
+evaluation-set mixes' failure modes well enough to route them to the
+correct downstream sprint with a named mechanism." The recalibrated
+close criteria (§7.6.5) reflect that pivot honestly. The pivot was
+the right call: a calibration commit on B1 or B2 without first
+falsifying the boundary-physics single-knob hypotheses would have
+been the same anti-pattern §7's Sprint 3 retrospective warned about
+("run the parameter sweep before narrating physics from a single
+parameter point"), generalized from MIX-01 to a multi-mix evaluation
+set.
+
+#### New mechanism-level findings
+
+Two findings that did not exist as hypotheses at sprint-3-complete:
+
+1. **B1 PeakMax invariance to boundary physics.** Across 48 sweep
+   points (F_vert × R_form, Reference + B1), MIX-04 and MIX-08 PeakMax
+   Δ held to within ±0.005°F of −1.46/−1.43°F. The signature is
+   composition-dependent (Reference 5 don't show it) and
+   boundary-physics-invariant. Routed to the hydration sprint series;
+   the engine's single-peak α(t_e) Arrhenius-weighted hydration model
+   is the suspected source. Documented in §7.6.3.
+
+2. **R9 — Arrhenius rate factor divergence above ~30°C.** Phase 2.6's
+   equivalent-age comparison on MIX-15 shows a clean crossover at
+   t≈55–60 hr (concrete temperature ≈31–34°C, just above T_REF=23°C),
+   after which the engine progressively under-predicts CW. Δte reaches
+   −7.6 hr by t=168 hr; ΔT reaches −3.04°F. Mode A (engine warmer than
+   CW during active hydration, t=8–48 hr, both mixes) is a separate
+   small calibration drift, not the same mechanism. R9 is opened with
+   mechanism traced (Phase 2.6 finding), routing deferred pending
+   kinetics-vs-inherited-calibration disambiguation. R9 is *not*
+   "routed to the hydration series" — that conflates the two mechanism
+   classes PR 16 worked to distinguish. Sprint 5 PR 18 may
+   characterize R9 Mode A overlap on the Reference set as a
+   diagnostic candidate (see §3 Sprint 5 PR sequence), which would
+   strengthen R9's routing without owning its resolution.
+
+These two findings are the durable scientific output of Sprint 4 —
+more durable than the calibration commits the sprint was originally
+scoped to deliver.
+
+#### What worked (carrying to Sprint 5)
+
+- **Ablation-first restructure after PR 15.** When PR 15's sweep
+  falsified the single-knob hypothesis, the sprint did not chase a
+  multi-knob fit. PR 15 closed diagnostic-only; PR 16 inherited the
+  same ablation-first discipline (Phase 1 sweeps before Phase 2
+  hypotheses). This is §6.3 generalized: not just "diagnostic before
+  fix" but "diagnostic-strong-enough-to-route is itself a valid PR
+  outcome." Sprint 5 PR 18 is shaped this way by design.
+
+- **Two-phase wait points in PR 15 / PR 16.** Both PRs paused after
+  Phase 1 ablation for a scope check before continuing into Phase 2
+  hypotheses. PR 15's Phase 1 → Phase 2 wait point was the moment the
+  calibration→characterization pivot was decided. PR 16's wait point
+  caught H6a's "too clean" warm-IC result (5/5 with −0.29°F PeakMax —
+  suspiciously identical to Reference) and triggered the H6b /
+  Phase 2.6 follow-on rather than committing on H6a alone. Phase
+  boundaries are good think-points; future PRs with diagnostic+fix
+  scope should structure them this way.
+
+- **Phase 2.5 verification battery in PR 16.** After H6a's clean
+  result, the prompt added an explicit verification phase before
+  proceeding: blanket-pin patch (H6b), code-misuse audit (H4), and
+  trajectory comparison (Phase 2.6). The battery is what surfaced
+  R9 — H6a alone would have routed B2 to hydration with the wrong
+  mechanism. Sprint 5 PR 18 should structure a similar verification
+  phase if its Phase 1 finding is "too clean."
+
+- **Designed-factorial recognition (PR 14 → PR 15/16 framing).** The
+  §7.5.2 finding that the 14-mix library varies on exactly one
+  construction field (placement_temp_F: 60 vs 45 in 1/14 mixes)
+  reframed the library from "natural sample" to "designed factorial
+  isolating mix-design and one cold-placement case." That reframing
+  is what made B1 and B2's separation clean enough for ablation
+  conclusions to land. Future thermal sprints should run a
+  construction-parameter diff before partitioning the evaluation set.
+
+- **Group-static partitioning in `run_all.py`.** GROUPS lives in the
+  driver, not in dataclasses; reverse-lookup `_MIX_TO_GROUP` is
+  first-match across reference/b1/b2/cluster_a. That keeps Sprint 5's
+  group rebalance (Reference-only evaluation set) a 5-line edit
+  rather than a refactor.
+
+#### What didn't work (don't repeat)
+
+- **SSH-passphrase blocking push on all 5 PRs.** Every PR in Sprint 4
+  hit the same passphrase-prompt-doesn't-render-in-sandbox issue at
+  the push step. Manual SSH push (user shell, not Claude Code's
+  shell) resolved it each time. The recurrence across 5 PRs without
+  documenting the pattern was a workflow miss. **§6.9 codifies the
+  fix as a positive practice**: Claude Code commits and tags locally,
+  user pushes after review. The discipline is valuable independent
+  of SSH and is the default from Sprint 5 onward.
+
+- **PR 15's original "calibration" framing made the diagnostic-only
+  close feel like a failure.** The sprint plan in §3 (pre-Sprint-4)
+  said "PR 15 — B1 calibration." When PR 15 closed without a
+  calibration commit, the prompt had to be re-read as "characterize-
+  and-route" mid-PR. Sprint 5's PR 18 / PR 19 structure (recon spike
+  PR + conditional-fix PR) is the corrected shape: scope the recon
+  PR as recon, scope the fix PR as conditional, don't conflate them.
+
+- **The §7.5.4 "RuntimeWarning suppress at run_all.py stderr-parse
+  layer if noisy" guidance under-specified.** PR 13 ended up using
+  `warnings.catch_warnings()` filter in `run_all.py` (not a stderr
+  parse) because the warning surfaces as a Python `RuntimeWarning`
+  before reaching stderr. The §7.5.4 wording set up a wrong mental
+  model. R7 cleanup (Sprint 6) is removing the pre-guard divide
+  pattern; the suppression in `run_all.py` is the interim.
+
+#### Risk register movement
+
+- **R1 (F_VERT_BY_ORIENTATION["unknown"]=0.15 MIX-01 calibrated only)**:
+  Narrowed, not closed. PR 15's sweep showed F_vert has clean Corner
+  RMS authority (monotone) but zero PeakMax authority for B1. R1's
+  "may not generalize" concern is now scoped: F_vert generalization
+  matters for Corner RMS calibration (Sprint 5 PR 20 in scope) and
+  doesn't matter for PeakMax (B1's binding constraint, not F_vert's
+  domain).
+- **R2 (F_VERT_BY_ORIENTATION non-"unknown" stub values)**: Deferred to
+  the multi-climate validation sprint series (still requires non-
+  "unknown" CW exports). Status unchanged in §4 row.
+- **R4 (Barber soil parameter literature picks)**: **Closed** in PR 17.
+  Defaults reverted to no-op pair (`soil_lag_hrs=0.0`,
+  `soil_damping=1.0`); helper code retained for future cold-climate
+  data. ADR-08 updated.
+- **R9 (Arrhenius rate factor divergence above ~30°C)**: **Opened** in
+  PR 16 Phase 2.6. Mechanism traced. Routing deferred pending
+  kinetics-vs-inherited-calibration disambiguation. Sprint 5 PR 18
+  may strengthen the Mode-A overlap evidence on the Reference set
+  but does not own R9's resolution.
+
+R3, R5, R6, R7, R8 unchanged from sprint-3-complete state.
+
+#### Sprint-series-closure framing (recorded for Sprint 5/6 planning)
+
+Sprint 4's closure changes the shape of the remaining thermal series.
+At sprint-3-complete, Sprint 5 was planned as "dual-peak hydration
+model" inside the thermal series. Sprint 4's findings — particularly
+the B1 PeakMax invariance and R9's rate-divergence-above-30°C signal
+— make clear that the hydration work is its own sprint series, not a
+single sprint. The thermal series ends at engine v3 (sprint-6-complete)
+on a Reference-set baseline; the hydration series, geometry coverage
+series, and multi-climate validation series are independent successors.
+§3's "Explicit deferrals" subsection records the boundary so future
+planning sessions don't pull the deferred work back into thermal-series
+scope by default.
 
 ---
 
