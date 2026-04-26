@@ -350,21 +350,27 @@ baseline.
 **Scope**:
 - R5: parameterize R_form by form material
   (steel/plywood/plastic-liner) via new `CWConstruction.form_type`
-  field. Steel value carries forward from Sprint 5's chosen
-  R_form (whether 0.0862 or 0.060). Plywood and plastic-liner values
-  from ACI 347 / contact-resistance literature; not validated against
-  CW (no exports for those forms in the current 14-mix library).
+  field. Steel value is 0.0862 m²·K/W (ADR-04 reinforced by PR 20
+  evaluation; R_form=0.060 blocked by MIX-02 kinetics-driven
+  contradiction). Plywood and plastic-liner values from ACI 347 /
+  contact-resistance literature; not validated against CW (no exports
+  for those forms in the current 14-mix library). R5 does NOT attempt
+  to fix the MIX-02 cluster contradiction (kinetics-driven; routes to
+  hydration series).
 - R7: suppress cosmetic `RuntimeWarning: invalid value encountered in
   divide` at harmonic-mean k-divide (`thermal_engine_2d.py:1619, 1624`).
   Currently mitigated via `np.where` guard; cleanup is removing the
   pre-guard divide pattern.
-- Engine v3 release: API cleanup, customer-facing docstrings,
-  documented Reference-set validation envelope (S0 tolerances on
-  half-mat 40×60×8ft footing, Austin summer, mid-SCM at 60°F
-  placement, steel form), explicitly-listed known residuals
-  (Centerline RMS, R9 Mode B), explicitly-listed out-of-envelope
-  conditions (cold placement, high-SCM mixes, non-half-mat geometry,
-  non-Austin climate).
+- Engine v3 release: extends `docs/engine_v3_release_notes.md` (PR 20
+  started the Centerline residual section). Sprint 6 adds:
+  Corner-side residuals (MIX-02 documented as a known mix-regime
+  limitation; cluster CornerRMS ~2.0°F is the validated envelope
+  statement, not closed); R5 result section; R7 cleanup section;
+  final validated envelope (geometry, climate, mix range, S0
+  tolerances, known residuals enumerated); out-of-envelope conditions
+  (cold placement [R9], high-SCM [Cluster A / hydration series],
+  non-half-mat geometry, non-Austin climate, kinetics-divergent mixes
+  [MIX-02-class]). API cleanup and customer-facing docstrings.
 - Tag `sprint-6-complete` and `engine-v3` on the same commit.
 
 #### Sprint 6 close criteria
@@ -683,6 +689,28 @@ during PR 18's manual bit-identity verification on the Reference set
 all 5 Reference rows, with a form-face-localized signature consistent
 with ADR-08's no-op-pair change. Resolved by a separate commit on
 `main` regenerating the baseline against current engine state.
+
+**Follow-on lesson (Sprint 5)**: regeneration must verify structural
+contract, not just schema. The 9f275e4 baseline regeneration (the §6.10
+mitigation for PR 17's stale baseline) dropped the MIX-13 skipped row
+that PR 14's manually-curated baseline included; two tests asserting on
+the row failed silently until PR 18's verification surfaced the
+regression. Fix landed in 1eeb67d (`run_all.py` `GROUPS["all"]` → main()
+append pattern).
+
+The lesson: §6.10's "regenerate every committed numerical artifact" rule
+is necessary but not sufficient — the regenerated file must also reproduce
+the *structural contract* (row count, sentinel handling, column
+conventions) of the previous version. A regeneration that produces the
+right schema but drops a structurally-required row is a §6.10-class miss
+caught only by downstream tests.
+
+Future regeneration commits should: (1) regenerate per §6.10's primary
+protocol, (2) `git diff` the regenerated file for structural changes (row
+count, schema, sentinel rows), (3) re-run `pytest` to catch test-contract
+regressions. The diff + pytest pair catches both the §6.10 primary case
+(stale numerical values from default change) and the follow-on case
+(structural drift from regeneration mechanism).
 
 ---
 
@@ -1249,10 +1277,14 @@ Two findings that did not exist as hypotheses at sprint-3-complete:
    mechanism traced (Phase 2.6 finding), routing deferred pending
    kinetics-vs-inherited-calibration disambiguation. R9 is *not*
    "routed to the hydration series" — that conflates the two mechanism
-   classes PR 16 worked to distinguish. Sprint 5 PR 18 may
-   characterize R9 Mode A overlap on the Reference set as a
-   diagnostic candidate (see §3 Sprint 5 PR sequence), which would
-   strengthen R9's routing without owning its resolution.
+   classes PR 16 worked to distinguish. Sprint 5 PR 18 D5 confirmed
+   the Mode-A signature on 5/5 Reference mixes — positive bias +0.77
+   to +1.21°F in [8,48] hr — with peak ΔT shifted from MIX-15's [12,24]
+   hr to [39,47] hr, consistent with 60°F-placement hydration timing.
+   The strict [12,24] hr time-of-max criterion was MIX-15-specific (cold
+   placement) and does not generalize as-is; the placement-temp-adjusted
+   signature matches. R9's Mode A is broader than PR 16 thought —
+   present on warm-placement Reference too, just kinetics-timing-shifted.
 
 These two findings are the durable scientific output of Sprint 4 —
 more durable than the calibration commits the sprint was originally
@@ -1365,6 +1397,182 @@ series, and multi-climate validation series are independent successors.
 §3's "Explicit deferrals" subsection records the boundary so future
 planning sessions don't pull the deferred work back into thermal-series
 scope by default.
+
+### §8.2 Sprint 5 retrospective
+
+Sprint 5 closed 2026-04-25 at tag `sprint-5-complete` (commit [SHA]).
+Four PRs landed across the sprint: PR 18 (Centerline recon spike), PR
+19 (top-surface BC ablation, negative result), PR 20 (R_form Reference
+evaluation + engine v3 release notes draft, conditional-commit deferred),
+PR 21 (this commit — close + retrospective). Plus four small support
+commits: baseline regeneration (9f275e4, post-PR-17 default-flow fix),
+§8 retrospective + ADR-09 + §6.9 passdown amendments (884471f), MIX-02
+mini-spike (8dc7131, disposition C), MIX-13 row fix (1eeb67d).
+
+**Theme realization**: Sprint 5 planned as "Reference-set residual
+characterization, fix-conditional" and shipped as that exactly, with
+both fix-conditional outcomes coming back NEGATIVE. The sprint produced
+no engine code commits; what it produced is more valuable — three
+structural findings that close hypothesis space for engine v3:
+
+1. **MIX-02 cross-diagnostic outlier signature.** PR 18 D1/D3/D4
+   opposite-signed residuals + spike disposition C (kinetics-divergent)
+   + PR 20 R_form opposite-signed response. Coherent across four
+   independent diagnostics. Mechanism: kinetics divergence × form-face
+   coupling = inverse residual response. Routes to hydration sprint series.
+
+2. **Top-surface BC residual is structural, not scalar.** PR 19: none
+   of h_conv, α_top, ε_top has authority on the cluster Centerline
+   residual within physically reasonable ranges; D3 amplitude ratio
+   moves *inversely* under h_conv scaling. Rules out any single-scalar
+   top-surface BC knob, not just the three swept. Routes to engine v3
+   investigation.
+
+3. **R_form is fully form-face-localized.** PR 20 C3 trivially passed:
+   CenterRMS Δ=0.000°F across 25 sweep runs. Strengthens ADR-04's
+   "load-bearing physics not legacy calibration" claim. R_form=0.060
+   doesn't generalize because of finding #1 (MIX-02 regresses). Steel
+   value 0.0862 carries to Sprint 6.
+
+#### Sprint 5 close — gate numbers
+
+Reference set holds S0 5/5 unchanged from sprint-4-complete (no engine
+commits). Values from the regenerated `validation/sprint4_baseline.md`
+(post-PR-17-defaults, 9f275e4):
+
+| Mix | PeakMax Δ | PeakGrad Δ | FieldRMS | CenterRMS | CornerRMS | S0 |
+|---|---|---|---|---|---|---|
+| MIX-01 | −0.29°F | −0.29°F | 0.88°F | 0.74°F | 2.22°F | 5/5 |
+| MIX-02 | −0.68°F | +1.16°F | 1.23°F | 0.57°F | 1.24°F | 5/5 |
+| MIX-03 | −0.30°F | −0.92°F | 0.87°F | 0.79°F | 2.72°F | 5/5 |
+| MIX-11 | −0.13°F | +0.07°F | 0.91°F | 0.79°F | 2.12°F | 5/5 |
+| MIX-12 | −0.31°F | −0.32°F | 0.87°F | 0.73°F | 2.23°F | 5/5 |
+
+B1 S0 2/5, B2 S0 1/5 — unchanged, no engine commits in Sprint 5.
+
+#### Deliverables
+
+- `validation/diagnostics/pr18_centerline_recon/pr18_summary.md`:
+  Centerline RMS recon across 5 Reference mixes. D1–D5 diagnostics.
+  Three structural signals (constant offset, amplitude-ratio inversion,
+  Mode-A kinetics timing shift).
+- `validation/diagnostics/sprint5_mix02_recon/mix02_recon.md`:
+  MIX-02 cross-diagnostic field diff (mini-spike). Disposition C:
+  kinetics-driven outlier, not form-physics.
+- `validation/diagnostics/pr19_top_bc_ablation/pr19_summary.md`:
+  Top-surface BC ablation. Negative result — no scalar knob has
+  authority on Centerline residual. s2 wait point correctly skipped.
+- `validation/diagnostics/pr20_r_form_eval/pr20_r_form_summary.md`:
+  R_form Reference-set evaluation. C3 Centerline trivially passed;
+  conditional commit deferred (MIX-02 Corner regression at R_form=0.060
+  blocked net improvement). R_form 0.0862 confirmed as Sprint 6 steel
+  value.
+- `docs/engine_v3_release_notes.md` (started, PR 20): Centerline
+  residual section drafted. Sprint 6 completes the file.
+- Four support commits: 9f275e4 (baseline regeneration), 884471f
+  (passdown amendments), 8dc7131 (MIX-02 mini-spike), 1eeb67d
+  (MIX-13 row fix).
+- This commit (PR 21): §8.2 retrospective, §3 Sprint 6 refinement,
+  §8.1 D5 framing fix, `run_all.py` required `--output-md`, §6.10
+  follow-on lesson.
+
+#### Floor / Target / Stretch outcome
+
+- **Floor**: met. Reference S0 5/5 maintained. Three structural
+  findings committed as durable characterization output. Engine v3
+  release notes started.
+- **Target**: half-met. Corner improvement *available* (cluster
+  CornerRMS ~2.0°F reachable at R_form=0.060 for 4 of 5 Reference
+  mixes) but not committed — MIX-02 regresses under R_form=0.060,
+  blocking net improvement. Centerline ruled out by PR 19 (structural,
+  not scalar). Target required both to close; neither closed.
+- **Stretch**: infeasible. Engine v3 ships with documented residuals;
+  the residuals were characterized, not closed.
+
+#### What worked (carrying to Sprint 6)
+
+- **Recon-spike-as-PR shape (PR 18).** Characterization-only PRs are
+  first-class work, not failed calibration PRs. When diagnostics find
+  nothing actionable inside-sprint-scope, landing the recon as a
+  committed record is the correct close.
+- **Two-phase wait points (PR 19).** The s1 → s2 wait point correctly
+  skipped s2 when s1 found no magnitude optimum. Avoids burning scope
+  on a Phase 2 investigation when Phase 1 has already falsified the
+  hypothesis.
+- **Mini-spike sub-PR pattern (MIX-02 recon).** When a recon surfaces
+  an unexpected outlier, a small dedicated diagnostic before the next
+  PR keeps scope tight without losing the finding. Routes into the
+  permanent diagnostic record without inflating the parent PR.
+- **Commit-on-main with manual-push review (§6.9).** Five review
+  checkpoints across the sprint caught the stale-baseline issue, the
+  MIX-13 dropped-row regression, and the h_conv monkey-patch scope
+  question before push. Manual review pays.
+- **Module-attribute monkey-patching as ablation tool (PR 19, PR 20).**
+  `h_forced_convection` and `R_FORM_CONTACT_SI` patched via context
+  manager; clean revert, no engine source modifications, uniform
+  application across all engine sites. Pattern reuses across future
+  ablation work.
+- **§6.10's first real application.** PR 17 stale baseline → 9f275e4
+  regeneration. The rule caught a downstream regression in 9f275e4
+  (MIX-13 row dropped), which is the §6.10 follow-on lesson (Item 5).
+  Self-correcting workflow in 2 steps.
+
+#### What didn't work (don't repeat)
+
+- **`run_all.py --output-md` default footgun.** Reproducing the §6.10
+  regeneration footgun on every verification run across PRs 18–20 was
+  a real ergonomic cost. Fixed in this commit: `--output-md` is now
+  required, no default.
+- **Loose prompt scoping on ablation breadth (PR 19).** The prompt
+  scoped "h_conv top" while prescribing a function-level patch that
+  affects both top and side. Ambiguity surfaced as a mid-execution
+  question; better-scoped prompt language would have avoided the wait.
+  Future ablation prompts should explicitly characterize patch breadth.
+- **Durable numbers need verification before drafting.** The `181 →
+  122` test count miscount in §8.1's first draft. Even at sprint-close
+  time, durable numbers require `pytest` verification before writing.
+  Carried from Sprint 4 as a lesson; landed on the wrong side once.
+
+#### Risk register movement
+
+- **R3** (first-48hr hydration shape divergence): unchanged —
+  accepted/deferred to hydration series.
+- **R5** (R_form form-material parameterization): **scope-narrowed**.
+  PR 20 confirmed R_form's authority is form-face-localized AND that
+  R_form recalibration on Reference is blocked by MIX-02's kinetics-
+  driven contradiction. R5 in Sprint 6 stays scoped to form-material
+  parameterization; explicitly does NOT attempt to fix the cluster vs
+  MIX-02 split (hydration-series scope). Steel value resolved: 0.0862.
+- **R7** (RuntimeWarning): unchanged — Sprint 6.
+- **R8** (CW parameter inheritance): **strengthened**. MIX-02 mini-
+  spike disposition C is canonical evidence that CW's hydration
+  regression consumes inputs not in our `CWMixDesign` (likely cement
+  Bogue compounds or admixture chemistry). Inherited by design; not a
+  fix item.
+- **R9** (Arrhenius rate factor divergence above ~30°C): **strengthened**.
+  PR 18 D5 found Mode-A overlap on 5/5 warm-placed Reference mixes
+  (placement-temp-shifted time-of-max consistent with kinetics timing).
+  PR 19 found D1 DC offset and D5 Mode-A offset cannot be cleanly
+  disambiguated until the amplitude residual closes. R9 routing remains
+  deferred but now has evidence on both branches.
+- **R10** (artifact regeneration): **first application + follow-on
+  lesson recorded**. §6.10 rule caught PR 17's stale baseline; 9f275e4
+  regeneration fixed it; 9f275e4 dropped MIX-13 row, caught by tests;
+  1eeb67d fixed the drop. Follow-on lesson appended to §6.10 in this
+  commit.
+- **No new risks opened in Sprint 5.** Three structural findings, all
+  routing to existing risks (R3/R8/R9) or existing sprint series. The
+  thermal sprint series is genuinely converging.
+
+#### Sprint-series-closure framing
+
+Sprint 5 confirms the framework set in §8.1 — the thermal sprint series
+ends at engine v3 (`sprint-6-complete`). What Sprint 5 added: the
+structural findings explicitly close the hypothesis space *inside* the
+thermal series. Top-surface BC authority is ruled out. R_form is
+localized. MIX-02's contradiction is routed to the hydration series.
+The remaining work for engine v3 is cleanup (R5, R7) and release notes
+finalization, not further characterization. Sprint 6 is the last sprint.
 
 ---
 

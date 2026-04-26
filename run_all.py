@@ -10,7 +10,7 @@ Usage:
 Defaults:
     --root         validation/cw_exports
     --group        evaluation_set
-    --output-md    validation/sprint4_baseline.md
+    --output-md    PATH  (required; see --help)
     PNGs are off by default; pass --png-dir to enable.
 """
 
@@ -55,11 +55,20 @@ def parse_args():
                    help="Named mix group (default: evaluation_set)")
     p.add_argument("--png-dir", default=None,
                    help="Directory for PNG outputs; if omitted, no PNGs written")
-    p.add_argument("--output-md", default="validation/sprint4_baseline.md",
-                   help="Path for markdown gate table (default: validation/sprint4_baseline.md)")
+    p.add_argument("--output-md", default=None,
+                   help="Path for markdown gate table (REQUIRED). Pass "
+                        "validation/sprint4_baseline.md only when intentionally "
+                        "regenerating the committed baseline per §6.10 protocol; "
+                        "otherwise pass /tmp/<name>.md or another non-committed path.")
     p.add_argument("--quiet", action="store_true",
                    help="Suppress per-mix stdout from print_gate_table")
-    return p.parse_args()
+    args = p.parse_args()
+    if args.output_md is None:
+        sys.exit("error: --output-md is required. For verification runs, "
+                 "pass --output-md /tmp/run_all_output.md. To regenerate "
+                 "the committed baseline (§6.10), pass --output-md "
+                 "validation/sprint4_baseline.md.")
+    return args
 
 
 def _build_md_table(results: list) -> str:
