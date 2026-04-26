@@ -413,6 +413,7 @@ and a status (open / mitigated / accepted).
 | R7 | Cosmetic RuntimeWarning at harmonic-mean k-divide masks potential future numerical issues | Sprint 6 | Mitigated via np.where guard; cleanup deferred |
 | R8 | Hydration model uses CW's parameters (τ, β, α_u, Ea, Hu) directly; if those parameters are miscalibrated in CW, our engine inherits the error | Sprint 4–5 | Accepted (inherited by design) |
 | R9 | Engine and CW diverge on Arrhenius rate factor at concrete temperatures above ~30°C. Source unknown — possibly different effective Ea, different reference temperature, or a CW-side rate cap not present in engine. Affects cold-placed mixes amplified by sustained high-T residence. MIX-15 −3°F PeakMax deficit traced to this divergence per PR 16 Phase 2.6. Mode A (small early calibration drift, ≤1.7°F, both mixes) is separate and non-blocking. Mode B (late-time divergence, cold-placed mixes only) is the unresolved item. | Sprint 5 if hydration-kinetics-aligned; Sprint 6 if inherited-calibration cleanup | Open |
+| R10 | Committed validation baselines (e.g. `validation/sprint4_baseline.md`) and committed test fixtures are downstream artifacts of engine defaults. PRs that change ADR-recorded defaults must regenerate every committed numerical artifact derived from those defaults; otherwise the committed file goes stale and false-positive bit-identity failures surface on later verification runs. | Sprint 5+ (workflow rule) | Mitigated — §6.10 codifies the rule. Precedent: PR 17 changed soil defaults but did not regenerate `validation/sprint4_baseline.md`; staleness surfaced during PR 18's manual verification, fixed in a separate commit on `main`. |
 
 ---
 
@@ -594,43 +595,94 @@ tag sites; six places to bite).
 
 ### §6.9 Manual push and tag discipline (Sprint 5+)
 
-Claude Code commits and creates local tags. Claude Code does *not* push
-branches or tags to remote. The user pushes manually after reviewing
-the local commit and any test/diff output Claude Code reports.
+Claude Code commits directly on `main` and creates local tags. Claude
+Code does *not* push to remote. The user reviews the local commit
+and any test/diff output Claude Code reports, then pushes manually.
 
 Workflow per PR:
 
-1. Claude Code: implement scope, run gates, commit on a dedicated
-   branch, create local tag(s).
-2. Claude Code: report branch name, commit SHA, gate results, anything
+1. Claude Code: from `main` at the previous PR's tag, implement
+   scope, run gates, commit on `main`, create local tag(s).
+2. Claude Code: report commit SHA, tag name, gate results, anything
    notable in the diff. Stop.
-3. User: review the diff locally (`git show <SHA>`) or on GitHub after
-   pushing the branch alone (`git push -u origin <branch>` without the
-   tag). User verifies the change matches the prompt's scope.
-4. User: if review passes, push the tag (`git push origin <tag>`). If
-   review fails, decide whether to amend, scope-cut, or retry; tag does
-   not get pushed for an unreviewed commit.
+3. User: review the commit locally (`git show <SHA>`, `git diff
+   <prev-tag>..HEAD --stat`). Verify the change matches the prompt's
+   scope.
+4. User: if review passes, push: `git push origin main` and (if a
+   tag was created) `git push origin <tag>`. If review fails, decide
+   whether to amend (`git commit --amend`), reset (`git reset --hard
+   <prev-tag>`), or retry; nothing reaches origin until review passes.
 5. User: §6.8 verification (`git tag -l <tag>` AND
    `git ls-remote --tags origin <tag>`).
-6. User: merge to main if the PR is sprint-PR-shape
-   (`git checkout main && git merge --ff-only <branch> && git push origin main`).
 
 **Why**: the human review checkpoint between commit and push is a
 safety gate. Claude Code's gate-passing is necessary but not sufficient
 — the diff itself can contain scope creep, missed edge cases, or test
 fixtures that look right but were generated against the wrong reference
-(caught on PR 13's MIX-01 baseline JSON spot-review). Human review
-catches these before the tag becomes durable.
+(caught on PR 13's MIX-01 baseline JSON spot-review and again on PR
+18's stale-baseline surfacing).
 
-Sprint 4 lesson: this discipline emerged from Claude Code's SSH
-constraints in the sandbox environment, but the discipline is valuable
-independent of SSH. Sprint 5 onward adopts it as default practice.
+**Why commit-on-main, not branch+merge**: Sprint 4 used branch+merge
+under §6.9's original draft; mid-Sprint-5 the convention shifted to
+commit-on-main because the branch overhead added no review value
+(reviews happen on the commit, not the branch). Commit-on-main keeps
+the rollback path simple (`git reset --hard origin/main` until the
+user pushes) without losing the human-review gate.
 
 Claude Code prompts should reflect this:
-- Specify "commit + create local tag, do **NOT** push" explicitly.
+- Specify "commit on `main` + create local tag, do **NOT** push" explicitly.
 - Report SHA + tag name + gate output for user review.
-- Skip the §6.8 verification step in the prompt itself (user runs it
-  post-push).
+- Skip the §6.8 verification step in the prompt itself (user runs
+  it post-push).
+- Do **NOT** create a branch.
+
+### §6.10 Regenerate committed numerical artifacts when defaults change
+
+When a PR changes an ADR-recorded default (or any engine parameter
+that flows through to a committed validation file, test fixture, or
+diagnostic markdown), regenerating every downstream artifact is part
+of the PR's scope. The regeneration must be in the same commit as
+the default change, not a follow-on PR.
+
+Inventory of committed numerical artifacts that derive from engine
+defaults (Sprint 5 snapshot — extend as new files are added):
+
+- `validation/sprint4_baseline.md` — generated by `run_all.py
+  --group all`, sensitive to soil_lag_hrs, soil_damping, F_vert*,
+  R_FORM_CONTACT_SI, h_conv functional form, α_top, ε_top, and any
+  ADR-recorded engine constant.
+- `tests/fixtures/mix01_pr17_baseline.json` (and predecessor PR-tagged
+  fixtures) — generated for bit-identical regression tests; sensitive
+  to any engine default change.
+- `validation/diagnostics/*/` — recon spike outputs; tied to the
+  engine state at the time of the spike. Listed for awareness, NOT
+  required to regenerate when defaults change (recon outputs are
+  permanently associated with the spike's source-commit SHA, not
+  with current `main`).
+
+Workflow per default-changing PR:
+
+1. Identify which committed numerical artifacts are sensitive to the
+   default being changed.
+2. Regenerate each. For `validation/sprint4_baseline.md`, that means
+   `python run_all.py --group all --output-md
+   validation/sprint4_baseline.md --quiet` from the new engine state.
+3. Commit the regeneration in the same PR as the default change.
+4. The PR's commit message lists which artifacts were regenerated.
+
+If an artifact's derivation chain is unclear, default to regenerating
+it. False-positive staleness wastes a verification cycle (PR 18's
+case); false-negative staleness (committing a default change without
+catching a downstream artifact) wastes a calibration cycle and may
+contaminate later analysis.
+
+Precedent: PR 17 (soil_lag_hrs 5.0→0.0, soil_damping 0.7→1.0) did not
+regenerate `validation/sprint4_baseline.md`. The staleness surfaced
+during PR 18's manual bit-identity verification on the Reference set
+— PeakGrad shifted ~0.19°F and CornerRMS shifted 0.04–0.08°F across
+all 5 Reference rows, with a form-face-localized signature consistent
+with ADR-08's no-op-pair change. Resolved by a separate commit on
+`main` regenerating the baseline against current engine state.
 
 ---
 
@@ -1106,9 +1158,13 @@ sprint and the reason the close criteria were recalibrated mid-flight.
   168 hr, surfacing Mode A and Mode B divergences.
 - ADR-08 updated (PR 17): `soil_lag_hrs=0.0`, `soil_damping=1.0`
   defaults committed. R4 closed.
-- Tests: 105 → 181 (76 net new across the sprint; PR 13 added the
-  largest tranche covering sentinel handling and parameterized PNG
-  output paths).
+- Tests: 105 → 119 → 122 across Sprint 4 (17 net new total). PR 13
+  added the largest tranche covering sentinel handling and
+  parameterized PNG output paths; PR 17 added 3 covering the
+  no-op-pair contract (soil_lag_hrs default, soil_damping default,
+  no-op pair behavior). The interim "181" figure recorded in earlier
+  drafts was a misread; verified pytest baseline at sprint-4-complete
+  is 122.
 
 #### Sprint 4 close — gate numbers
 
