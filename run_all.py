@@ -17,7 +17,6 @@ Defaults:
 import sys
 import os
 import argparse
-import warnings
 from pathlib import Path
 
 from compare_to_cw import run_one, print_gate_table
@@ -143,13 +142,7 @@ def main():
             os.path.join(args.png_dir, f"cw_comparison_{mix}.png")
             if args.png_dir else None
         )
-        # Suppress R7 RuntimeWarning here only; CLI path (compare_to_cw.py) still shows it
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=RuntimeWarning,
-                message="invalid value encountered in divide",
-            )
-            result = run_one(scenario_dir, png_path=png_path)
+        result = run_one(scenario_dir, png_path=png_path)
         result["group"] = _group_label(mix)
         if not args.quiet:
             print_gate_table(result)

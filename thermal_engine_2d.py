@@ -1704,16 +1704,21 @@ def solve_hydration_2d(
 
         # -- Harmonic-mean interface conductivities --
         # Safe division: when both cells have k=0 (air-air face), denom=0 → 0/0.
-        # np.where prevents the NaN; harmonic mean of (0,0) is correctly 0.
+        # np.divide(out=zeros, where=denom>0) avoids the RuntimeWarning; result
+        # is identical to the earlier np.where guard for all physical k values.
         _denom_x = k_cell[:, :-1] + k_cell[:, 1:]
-        k_x_face = np.where(
-            _denom_x == 0.0, 0.0,
-            2.0 * k_cell[:, :-1] * k_cell[:, 1:] / _denom_x,
+        k_x_face = np.divide(
+            2.0 * k_cell[:, :-1] * k_cell[:, 1:],
+            _denom_x,
+            out=np.zeros_like(_denom_x),
+            where=(_denom_x > 0.0),
         )
         _denom_y = k_cell[:-1, :] + k_cell[1:, :]
-        k_y_face = np.where(
-            _denom_y == 0.0, 0.0,
-            2.0 * k_cell[:-1, :] * k_cell[1:, :] / _denom_y,
+        k_y_face = np.divide(
+            2.0 * k_cell[:-1, :] * k_cell[1:, :],
+            _denom_y,
+            out=np.zeros_like(_denom_y),
+            where=(_denom_y > 0.0),
         )
         # Air cell k=0 ensures all faces touching air are already 0 from the
         # formula above (harmonic mean of (0, k) = 0 for any k>=0). No

@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+# PR 23 (R7): RuntimeWarnings (typically numerical issues like
+# divide-by-zero) error out so future regressions surface in CI.
+# Narrow to RuntimeWarning specifically; UserWarning is reserved for
+# legitimate engine signals (PR 22's resolve_r_form cw_validated=False
+# path).
+filterwarnings = [
+    "error::RuntimeWarning",
+]
