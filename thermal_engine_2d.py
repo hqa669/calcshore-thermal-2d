@@ -771,6 +771,26 @@ class HydrationResult:
     """Output from solve_hydration_2d.
 
     All temperatures in °C, times in seconds, equivalent age in hours.
+
+    Customer-facing trajectory fields:
+
+    - t_s (n_out,): sampled output times in seconds.
+    - T_field_C (n_out, ny, nx): temperature field over the full 2D grid.
+    - alpha_field (n_out, ny, nx): degree of hydration field.
+    - t_e_field_hrs (n_out, ny, nx): equivalent age field in hours.
+    - centerline_T_C (n_out, ny): temperature along the centerline column
+      (x = x_max), one row per y-node.
+    - peak_T_C (float): maximum temperature over all time and space.
+    - peak_T_location (tuple): (j, i) grid indices of the peak temperature.
+    - peak_alpha (float): maximum degree of hydration over all time and space.
+
+    Solver metadata: dt_inner_s (nominal CFL time step), n_inner_steps
+    (total inner steps executed), n_output_samples (len(t_s)).
+
+    Diagnostic history fields (top_flux, T_amb, T_ground, q_solar, q_LW,
+    q_conv, q_evap, q_side_*, T_outer_form, etc.) default to None. They are
+    populated only when solve_hydration_2d is called with
+    diagnostic_outputs=True and boundary_mode="full_2d".
     """
 
     t_s: np.ndarray              # shape (n_out,) — sampled output times

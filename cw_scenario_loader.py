@@ -105,7 +105,22 @@ CW_DAT_INDEX = {
 
 @dataclass
 class CWMixDesign:
-    """Mix design + hydration parameters, as CW represents them."""
+    """Mix design and hydration parameters as CW extracts them from a TCP.
+
+    Customer-set composition fields: cement_type_I_II_lb_yd3,
+    fly_ash_F_lb_yd3, fly_ash_C_lb_yd3, ggbfs_lb_yd3, silica_fume_lb_yd3,
+    water_lb_yd3, coarse_agg_lb_yd3, fine_agg_lb_yd3, air_content_pct,
+    fly_ash_CaO_pct.
+
+    Hydration kinetics (regressed by CW from the TCP, or directly entered):
+    activation_energy_J_mol (Ea), tau_hrs (τ), beta (β), alpha_u (αu),
+    Hu_J_kg. These drive the Arrhenius hydration model; see
+    docs/engine_v3_release_notes.md for the validated kinetics range.
+
+    Derived thermal properties: thermal_conductivity_BTU_hr_ft_F,
+    aggregate_Cp_BTU_lb_F, CTE_microstrain_F. Default values reflect the
+    39.1% SCM Reference mix (limestone coarse aggregate, siliceous fine sand).
+    """
     cement_type_I_II_lb_yd3: float = 350.0
     fly_ash_F_lb_yd3: float = 0.0
     fly_ash_C_lb_yd3: float = 0.0
@@ -154,7 +169,17 @@ class CWMixDesign:
 
 @dataclass
 class CWGeometry:
-    """Member geometry."""
+    """Placement geometry for a half-mat footing.
+
+    Customer-set dimensions: depth_ft (mat thickness), width_ft, length_ft.
+    The engine v3 validated envelope is the 40×60×8 ft half-mat footing
+    (width=40, length=60, depth=8); geometry outside this envelope is
+    out-of-envelope (R6; routes to the geometry coverage series).
+
+    analysis_type and shape default to "2-D" and "Rect. footing" — these
+    match the engine v3 solver's 2D half-mat formulation and should not be
+    changed unless the solver is extended.
+    """
     depth_ft: float = 8.0
     width_ft: float = 40.0
     length_ft: float = 60.0
@@ -164,7 +189,31 @@ class CWGeometry:
 
 @dataclass
 class CWConstruction:
-    """Construction / curing parameters."""
+    """Construction and curing parameters for the placement.
+
+    Customer-set fields: placement_temp_F, placement_date, placement_hour,
+    blanket_R_value, form_removal_hrs, side_cure_method, top_cure_method_1,
+    top_cure_method_2, top_cure_blanket_time_hrs, delay_strip_to_cure_hrs,
+    soil_temp_F, footing_subbase, form_color, form_orientation.
+
+    Radiative tunables (customer-adjustable): solar_absorptivity_top,
+    solar_absorptivity_side, emissivity_top, emissivity_side,
+    vertical_solar_factor (None = use form_orientation lookup; override for
+    sweeps or ablation only).
+
+    form_type accepts {"steel", "plywood", "plastic_liner"} (case-insensitive;
+    the loader normalizes to lowercase at parse time). Engine v3 is validated
+    only for steel forms (ADR-04, reinforced PR 20). Plywood is
+    out-of-envelope (R_form = 0.17 m²·K/W from ACI 306R-88, not
+    CW-validated); using it emits a UserWarning at runtime via
+    resolve_r_form(). plastic_liner is not implemented and raises
+    NotImplementedError. See docs/engine_v3_release_notes.md for the
+    full envelope.
+
+    soil_lag_hrs and soil_damping are deprecated no-ops (defaulted to no-op
+    values in PR 17, ADR-08); retained for future cold-climate work where
+    ground-air differentials become identifiable.
+    """
     placement_temp_F: float = 60.0
     placement_hour: int = 5
     placement_date: str = "2026/7/15"
@@ -206,18 +255,25 @@ class CWConstruction:
 
 @dataclass
 class CWEnvironment:
-    """Environment: hourly arrays from weather file + CW-computed daily averages.
+    """Climate time series and location metadata for the placement.
 
-    The hourly arrays cover analysis_duration_days starting at placement_date @
-    placement_hour. These are the TRUE BC values for a physics-correct engine.
+    Hourly boundary condition arrays (length = 24 × analysis_duration_days,
+    starting at placement_date @ placement_hour): T_air_F, RH_pct,
+    solar_W_m2, wind_m_s, cloud_cover, pressure_hPa. These are the true
+    physics BC values the engine uses for each time step.
 
-    The daily averages are what CW displays in its UI ("Ave. Max Daily Solar =
-    848.1 W/m²") and may differ slightly from our hourly-array max if CW uses
-    internal smoothing or design factors.
+    Derived hourly arrays computed at load time from weather columns:
+    T_dp_C (dew point, Magnus-Tetens), T_sky_C (sky temperature,
+    Berdahl-Martin from T_air + cloud_cover).
 
-    T_dp_C and T_sky_C are computed at load time from the weather file columns
-    (T_dry_bulb_C, RH_pct, cloud_cover) via Magnus-Tetens and Berdahl-Martin
-    respectively. They are not parsed directly from the weather file.
+    CW UI averages (may differ slightly from raw hourly max due to CW
+    internal averaging): cw_ave_max_daily_temp_F, cw_ave_min_daily_temp_F,
+    cw_ave_max_solar_W_m2, cw_ave_max_wind_m_s, cw_ave_max_RH_pct,
+    cw_ave_min_RH_pct.
+
+    Location metadata: lat_deg, lon_deg, elevation_m, location. Engine v3
+    validated envelope is Austin TX summer (location="TX, Austin"). Other
+    climates are out-of-envelope; see docs/engine_v3_release_notes.md.
     """
     # Hourly time series, length = 24 * analysis_duration_days
     hours: np.ndarray = field(default_factory=lambda: np.array([]))

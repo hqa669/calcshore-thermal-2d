@@ -66,21 +66,82 @@ def pass_fail(ok):
 
 
 def run_one(scenario_dir: str, *, png_path: str | None = None) -> dict:
-    """
-    Run thermal engine on a single CW scenario directory.
+    """Run engine vs CW comparison for a single mix scenario.
+
+    Loads CW input.dat + weather.dat + output.txt from scenario_dir, runs the
+    CalcShore thermal engine on the same construction parameters, and returns a
+    structured comparison dict containing peak temperatures, gradients, RMS
+    errors, and S0 / S1-aspire gate dispositions.
 
     Parameters
     ----------
     scenario_dir : str
-        Directory containing input.dat, weather.dat, output.txt.
-        If output.txt is missing, returns a skipped sentinel dict.
-    png_path : str | None
-        If provided, write the 4×3 comparison grid to this path.
-        If None, no PNG is written.
+        Path to a scenario directory containing CW input.dat, weather.dat, and
+        output.txt. The directory name is used as the mix identifier (e.g.,
+        "MIX-01"). If output.txt is absent, the scenario is treated as a
+        sentinel skip and a result dict with ``skipped=True`` is returned — no
+        exception is raised by the library path.
+    png_path : str or None, optional
+        Keyword-only. If provided, write a 4×3 comparison plot grid to this
+        path. Default None means no plot is produced.
 
     Returns
     -------
-    dict — see module docstring for full key inventory.
+    result : dict
+        Structured comparison result. Top-level keys:
+
+        scenario_dir : str
+            Input path, echoed back (trailing slash stripped).
+        scenario_name : str
+            Basename of scenario_dir (e.g., "MIX-01").
+        skipped : bool
+            True if output.txt was missing; only skip_reason is also populated.
+        skip_reason : str or None
+            ``"no_cw_output"`` when skipped=True, else None.
+        meta : dict
+            ``scm_pct`` (float), ``placement_temp_F`` (float),
+            ``total_cementitious_lb_yd3`` (float).
+        engine : dict
+            Engine extractions: ``peak_max_F``, ``peak_max_hr``,
+            ``peak_grad_F``, ``peak_grad_hr`` (all float); ``t_wall_s``
+            (solver wall time); ``n_steps``, ``n_nodes``,
+            ``n_output_samples`` (int).
+        cw : dict
+            CW reference values: ``peak_max_F``, ``peak_max_hr``,
+            ``peak_grad_F``, ``peak_grad_hr``.
+        deltas : dict
+            Engine minus CW: ``peak_max_F``, ``peak_grad_F``.
+        rms : dict
+            RMS error vs CW over the evaluation window: ``field_F``,
+            ``center_F``, ``corner_F``.
+        s0 : dict
+            Per-gate S0 pass/fail booleans. Keys (unsuffixed): ``peak_max``,
+            ``peak_grad``, ``field``, ``center``, ``corner``.
+        s0_pass_count : int
+        s0_pass_total : int
+        s0_overall : bool
+            True when all 5 S0 gates pass.
+        s1_aspire : dict
+            Per-gate S1-aspire booleans; same 5 keys as ``s0``.
+        rms_window_hr : tuple
+            ``(start_hr, end_hr)`` of the RMS evaluation window.
+        rms_n_samples : int
+            Number of output samples in the RMS window.
+
+    Notes
+    -----
+    The engine v3 validated envelope is steel-form, half-mat geometry
+    (40×60×8 ft), Austin TX summer, 60°F placement, 39.1% SCM Reference
+    mixes. See docs/engine_v3_release_notes.md for the full validated
+    envelope, known residuals, and out-of-envelope conditions.
+
+    Examples
+    --------
+    >>> result = run_one("validation/cw_exports/MIX-01")
+    >>> result["s0_overall"]
+    True
+    >>> result["deltas"]["peak_max_F"]
+    -0.29
     """
     d = scenario_dir.rstrip("/")
 

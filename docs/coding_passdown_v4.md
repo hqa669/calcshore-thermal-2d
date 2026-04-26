@@ -1607,6 +1607,159 @@ localized. MIX-02's contradiction is routed to the hydration series.
 The remaining work for engine v3 is cleanup (R5, R7) and release notes
 finalization, not further characterization. Sprint 6 is the last sprint.
 
+### §8.3 Sprint 6 retrospective + thermal-series closure
+
+Sprint 6 closed 2026-04-26 at tag `sprint-6-complete` (this commit). Three
+PRs landed: PR 22 (R5 form-material parameterization), PR 23 (R7
+RuntimeWarning cleanup + strict pytest config), PR 24 (this commit —
+release notes finalization + customer-facing API docstrings +
+retrospective).
+
+**Theme realization**: Sprint 6 planned as "production-readiness cleanup
+on the validated Reference-set baseline" and shipped as that exactly. No
+surprises, no scope drift, no negative-result PRs. R5 and R7 closed
+cleanly; engine v3 ships with documented residuals and validated envelope.
+
+#### Sprint 6 close — gate numbers
+
+Reference set holds S0 5/5 unchanged from `sprint-4-complete` and
+`sprint-5-complete` (PR 22 was bit-identical for steel forms; PR 23 was
+bit-identical by construction). Values from
+`validation/sprint4_baseline.md` (regenerated at each PR per §6.10
+protocol; zero diff through Sprint 6):
+
+| Mix | Group | SCM% | PlaceTemp | PeakMax Δ | PeakGrad Δ | FieldRMS | CenterRMS | CornerRMS | S0 |
+|---|---|---|---|---|---|---|---|---|---|
+| MIX-01 | Reference | 39.1% | 60°F | −0.29°F | −0.29°F | 0.88°F | 0.74°F | 2.22°F | 5/5 |
+| MIX-02 | Reference | 39.1% | 60°F | −0.68°F | +1.16°F | 1.23°F | 0.57°F | 1.24°F | 5/5 |
+| MIX-03 | Reference | 39.1% | 60°F | −0.30°F | −0.92°F | 0.87°F | 0.79°F | 2.72°F | 5/5 |
+| MIX-11 | Reference | 39.1% | 60°F | −0.13°F | +0.07°F | 0.91°F | 0.79°F | 2.12°F | 5/5 |
+| MIX-12 | Reference | 39.1% | 60°F | −0.31°F | −0.32°F | 0.87°F | 0.73°F | 2.23°F | 5/5 |
+
+B1 S0 2/5 (MIX-04, MIX-08), B2 S0 1/5 (MIX-15) — unchanged from Sprint 4
+PR 15/16 dispositions. Both groups routed to the hydration series.
+
+#### Deliverables
+
+- **PR 22**: form-material parameterization (R5). `R_FORM_BY_FORM_TYPE`
+  dict + `resolve_r_form()` resolver replacing `R_FORM_CONTACT_SI`.
+  Steel value 0.0862 unchanged (ADR-04 reinforced). Plywood
+  out-of-envelope (ACI 306R-88, `cw_validated=False`). Plastic_liner
+  not implemented (no peer-reviewed source for contact resistance value).
+  Loader normalizes `form_type` to lowercase at parse time (ADR-10 added).
+  `R_FORM_CONTACT_SI` retained as deprecated alias to avoid an 8-file
+  refactor out of scope for R5. R5 closed.
+- **PR 23**: RuntimeWarning cleanup + strict pytest config (R7). Engine
+  fix at `thermal_engine_2d.py` lines 1711, 1716 (`np.divide(out=,
+  where=)` canonical pattern). `run_all.py` interim filter removed.
+  `pyproject.toml` added with `filterwarnings = error::RuntimeWarning`
+  (narrowed to RuntimeWarning; UserWarning preserved for the
+  `resolve_r_form()` out-of-envelope warning path). 5 new tests
+  verifying UserWarning/RuntimeWarning separation. R7 closed.
+- **PR 24 (this commit)**: release notes finalized (Overview, Validated
+  envelope, Known residuals, Out-of-envelope conditions, Validation
+  summary table, API surface, Engineering history); customer-facing
+  Numpy-style docstrings on `run_one()` + 5 dataclasses (`CWMixDesign`,
+  `CWGeometry`, `CWConstruction`, `CWEnvironment`, `HydrationResult`);
+  DRAFT marker removed; §8.3 retrospective + thermal-series-closure
+  framing; tags `pr-24-complete` + `sprint-6-complete` + `engine-v3`
+  on same SHA.
+
+#### Floor / Target outcome
+
+- **Floor**: met. R5 + R7 closed; engine v3 release notes complete;
+  `sprint-6-complete` tagged.
+- **Target**: met. Customer-facing API documented (5 surfaces,
+  Numpy-style); validation summary + out-of-envelope sections cover all
+  known residuals.
+- **Stretch**: not defined for Sprint 6 (the §3 entry listed Floor +
+  Target only).
+
+#### What worked (durable workflow lessons)
+
+- **§6.10 protocol caught no failures in Sprint 6.** Both PR 22 and
+  PR 23 regenerated `validation/sprint4_baseline.md` per §6.10 protocol;
+  both produced empty diffs as expected. The discipline operated
+  correctly even when nothing went wrong — that's the *desired* steady
+  state. §6.10's value isn't only catching drift; it's also providing
+  zero-cost confirmation that no drift occurred. Carry forward.
+- **Verify-don't-trust-even-yesterday's-report.** PR 22's empirical
+  first-step grep (`form_type` already exists on `CWConstruction`) caught
+  a §3 wording drift authored ~24 hours earlier. PR 23's empirical
+  line-number discovery caught both §3's stale 1619/1624 *and* PR 22's
+  stale 1710/1715 from the day before. The pattern of trusting nothing
+  — not the passdown, not the prior PR's report — and verifying
+  empirically is what made both PRs land cleanly. Carry forward.
+- **Hybrid back-compat dispositions.** PR 22 retained `R_FORM_CONTACT_SI`
+  as a deprecated alias rather than refactoring 8 downstream files. The
+  cleanup cost (silent no-op on diagnostic harnesses) is low; the
+  refactor cost would have been high and out of scope. Knowing when to
+  take a hybrid shape vs. a clean refactor is a sprint-shape skill that
+  paid off here.
+
+#### What didn't work (don't repeat)
+
+Sprint 6 ran clean. The closest approximation to a workflow miss was the
+line-number staleness in §3 and PR 22's report (stale references to
+engine lines that had since moved), but that was caught by the
+empirical-first-step discipline before causing damage. Nothing to
+structurally change; the discipline held.
+
+#### Risk register movement
+
+- **R5 (R_form form-material parameterization)**: **Closed** in PR 22.
+  Steel value 0.0862 reinforced; plywood + plastic_liner added as
+  documented out-of-envelope entries. The cluster contradiction with
+  MIX-02 was explicitly not addressed — that requires the hydration
+  series to disambiguate whether the divergence is in the kinetics model
+  or the thermal-BC structure. Per §8.2 finding #1, it is not closable
+  within the thermal sprint series.
+- **R7 (RuntimeWarning cleanup)**: **Closed** in PR 23. Engine fix +
+  interim suppression removal + strict pytest config locked in. Future
+  regressions surface as pytest failures.
+- **R3 (first-48hr hydration shape divergence)**, **R8 (CW parameter
+  inheritance)**, **R9 (Arrhenius rate factor divergence above ~30°C)**:
+  carry to the hydration sprint series.
+- **R6 (geometry coverage)**: carry to the geometry coverage series.
+- **R10 (artifact regeneration discipline)**: **Mitigated permanently**.
+  §6.10 + Sprint 5 follow-on lesson held throughout Sprint 6 with zero
+  failures. The rule is operationally embedded; carry forward without
+  modification.
+
+#### Thermal-series closure
+
+This is the last sprint of the thermal sprint series. Six sprints total
+(Sprints 0–6 in `coding_passdown_v3.md` and `coding_passdown_v4.md`),
+shipping engine v3 with the validated envelope documented in
+`docs/engine_v3_release_notes.md`. The series produced:
+
+- 2D half-mat finite-difference solver (Sprint 0–2)
+- MIX-01 → 5-mix Reference set → 8-mix evaluation set validation
+  trajectory (Sprint 2 → 4 → 5)
+- 10 ADRs (ADR-01 through ADR-10), all load-bearing for engine v3
+- 127 pytest tests covering engine, loader, harness, and warnings
+- §6.1–§6.10 workflow disciplines, all empirically validated
+- 4 documented out-of-envelope conditions explicitly routed to
+  successor sprint series (cold/warm placement, high-SCM Cluster A,
+  non-half-mat geometry, non-Austin climate)
+
+**Successor sprint series** (each opens in `coding_passdown_v5.md` in a
+future session):
+- *Hydration series*: dual-peak hydration model; Cluster A recovery;
+  R3/R8/R9 closure; MIX-02 kinetics divergence resolution; placement
+  temperature range extension.
+- *Geometry coverage series*: full-mat, slab, column, wall validation;
+  R6 closure.
+- *Multi-climate validation series*: non-Austin climates, cold-climate
+  exports; R2 testable.
+
+**At `sprint-6-complete` / `engine-v3`, the thermal-physics work is
+done.** The remaining residuals are characterized, routed, and
+documented in `docs/engine_v3_release_notes.md`. Future sessions opening
+v5 should treat engine v3 as the validated baseline and not relitigate
+thermal physics unless a successor series finds a thermal-physics term
+newly relevant.
+
 ---
 
 ## Appendix A: Quick reference — Sprint 2 close state
