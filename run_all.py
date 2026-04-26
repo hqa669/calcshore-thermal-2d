@@ -146,6 +146,22 @@ def main():
             print_gate_table(result)
         results.append(result)
 
+    # MIX-13 has no CW output (awaits re-export, §7.5.4) and is excluded from
+    # GROUPS["all"] to keep the group definition clean. When running --group all
+    # the committed baseline must still include MIX-13 as a skipped sentinel row
+    # (PR 14 contract; tests test_baseline_has_15_rows, test_mix13_skipped_row_present).
+    # run_one()'s sentinel handler produces the correct skipped dict; we just need
+    # to include it here and insert it in mix-number order.
+    if args.group == "all" and not args.mixes:
+        mix13_result = run_one(os.path.join(args.root, "MIX-13"))
+        mix13_result["group"] = "ungrouped"
+        insert_pos = next(
+            (i for i, r in enumerate(results)
+             if os.path.basename(r["scenario_dir"]) >= "MIX-14"),
+            len(results),
+        )
+        results.insert(insert_pos, mix13_result)
+
     # ------------------------------------------------------------------ #
     # Write markdown output
     # ------------------------------------------------------------------ #
