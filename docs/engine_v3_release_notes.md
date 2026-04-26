@@ -72,6 +72,20 @@ amplitude story closes. R9's kinetics-vs-inherited-calibration
 disambiguation is correspondingly deferred to engine v3
 investigation alongside the BC structural work.
 
+**Item 2 outcome (R_form form-material parameterization, PR 22)**:
+`R_FORM_CONTACT_SI` module constant replaced by `R_FORM_BY_FORM_TYPE`
+dict + `resolve_r_form(construction)` resolver. Validated form type:
+**steel** only (`cw_validated=True`, 0.0862 m²·K/W, ADR-04 / PR 20).
+Documented but not validated: **plywood** (0.17 m²·K/W, ACI 306R-88
+Table 7.3.5/§7.3, `cw_validated=False`, OUT-OF-ENVELOPE — no
+plywood-form mixes in 14-mix library). **plastic_liner** value not
+yet pinned from literature (`NotImplementedError` at resolve time).
+Engine emits a one-time `UserWarning` for any `cw_validated=False`
+form type at engine entry; `UserWarning` category is intentionally
+distinct from `RuntimeWarning` so strict test configs that elevate
+`RuntimeWarning` to errors do not catch legitimate out-of-envelope use.
+Library distribution: 15/15 mixes in 14-mix library are steel.
+
 **Item 1 outcome (R_form Reference-set evaluation, PR 20)**:
 R_form residual documented — PR 15 candidate (R_form=0.060) did
 not generalize to the full Reference set. The cluster mixes

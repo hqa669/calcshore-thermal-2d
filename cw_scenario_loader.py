@@ -180,7 +180,7 @@ class CWConstruction:
     vertical_solar_factor: float | None = None
     form_removal_hrs: float = 168.0
     form_color: str = "Red"
-    form_type: str = "Steel"
+    form_type: str = "steel"
     form_orientation: str = "unknown"     # {"south","east","west","north","unknown"}
 
     side_cure_method: str = "Wet Blanket"
@@ -355,7 +355,7 @@ def parse_cw_dat(path: str) -> Tuple[CWMixDesign, CWGeometry, CWConstruction, Di
         blanket_R_value=_getf(CW_DAT_INDEX['blanket_R_value']),
         form_removal_hrs=_getf(CW_DAT_INDEX['form_removal_hrs']),
         form_color=_get(CW_DAT_INDEX['form_color']),
-        form_type=_get(CW_DAT_INDEX['form_type']),
+        form_type=_get(CW_DAT_INDEX['form_type']).strip().lower(),  # trust boundary: normalize to lowercase
         top_cure_blanket_time_hrs=_getf(CW_DAT_INDEX['top_cure_blanket_time_hrs']),
         delay_strip_to_cure_hrs=_getf(CW_DAT_INDEX['delay_strip_to_cure_hrs']),
         soil_temp_F=_getf(CW_DAT_INDEX['soil_temp_F']),

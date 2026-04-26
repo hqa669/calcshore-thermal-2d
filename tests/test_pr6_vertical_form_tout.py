@@ -296,7 +296,7 @@ def test_pr6_r_form_zero_diagnostic(monkeypatch, capsys):
     grid, result_a = _run_full2d(scn)
     rms_a = _corner_rms_F(grid, result_a, scn.cw_validation)
 
-    monkeypatch.setattr(te, "R_FORM_CONTACT_SI", 1e-9)
+    monkeypatch.setitem(te.R_FORM_BY_FORM_TYPE, "steel", te.FormTypeRForm(r_form=1e-9, cw_validated=True, source="test override"))
     _, result_b = _run_full2d(scn)
     rms_b = _corner_rms_F(grid, result_b, scn.cw_validation)
 

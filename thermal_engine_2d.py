@@ -122,9 +122,54 @@ FORM_R_SI = 0.0   # m²·K/W
 # 4.08°F to 8.85°F, confirming 0.0862 is real contact physics, not an
 # artifact. Renamed to R_FORM_CONTACT_SI in PR 9 to reflect this.
 #
-# Sprint 3+ may parameterize by form material (steel / plywood / plastic
-# liner) and cure method via new CWConstruction.form_type fields.
+# Sprint 6 PR 22: parameterized via R_FORM_BY_FORM_TYPE + resolve_r_form().
+# Retained as deprecated alias; back-compat for diagnostic harnesses that read
+# this attribute directly. Engine production path reads via resolve_r_form().
 R_FORM_CONTACT_SI: float = 0.0862   # m²·K/W  (= 0.490 hr·ft²·°F/BTU × 0.1761)
+
+
+@dataclass(frozen=True)
+class FormTypeRForm:
+    """Form-face contact resistance lookup entry with provenance metadata.
+
+    Carries the R_form value plus provenance so the engine can distinguish
+    CW-validated form types (steel, ADR-04 / PR 20) from documented-but-
+    unvalidated estimates used out-of-envelope.
+    """
+    r_form: float           # m²·K/W contact resistance
+    cw_validated: bool      # True only if value validated against CW exports
+    source: str             # citation or note for downstream traceability
+
+
+R_FORM_BY_FORM_TYPE: dict[str, FormTypeRForm] = {
+    "steel": FormTypeRForm(
+        r_form=R_FORM_CONTACT_SI,
+        cw_validated=True,
+        source="ADR-04 (Sprint 2 PR 6); reinforced by PR 20 R_form Reference-set evaluation (Sprint 5)",
+    ),
+    "plywood": FormTypeRForm(
+        r_form=0.17,
+        cw_validated=False,
+        source=(
+            "ACI 306R-88 Table 7.3.5 / Section 7.3 (ASHRAE 1977 k data): 0.17 m²·K/W for "
+            "3/4-inch (19-20 mm) plywood panel material R. This is bulk panel resistance, not "
+            "a separately measured interfacial contact film. OUT-OF-ENVELOPE — not validated "
+            "against CW exports (no plywood-form mixes in 14-mix library)."
+        ),
+    ),
+    "plastic_liner": FormTypeRForm(
+        r_form=float("nan"),  # TODO(PR 22 follow-on): pin from literature; no defensible source found
+        cw_validated=False,
+        source=(
+            "NOT PINNED — no peer-reviewed source found with distinct R_form for "
+            "plastic-lined steel forms; plastic liner adds negligible bulk R "
+            "(~0.0003 m²·K/W for 0.1 mm HDPE at k=0.35 W/m·K). "
+            "OUT-OF-ENVELOPE — not validated against CW exports."
+        ),
+    ),
+}
+
+_warned_form_types: set[str] = set()
 
 # Vertical-surface solar projection factor: fraction of horizontal irradiance
 # incident on a vertical form face.
@@ -184,6 +229,42 @@ EMIS_GROUND: float = 0.95
 SOIL_PROPERTIES_2D: dict = {'k': 1.50, 'rho': 2100.0, 'Cp': 900.0}
 BLANKET_PROPERTIES_2D: dict = {'rho': 100.0, 'Cp': 1500.0}
 # k_blanket is derived from R-value and thickness at solver call-site.
+
+
+def resolve_r_form(construction) -> float:
+    """Resolve R_form contact resistance from construction.form_type.
+
+    Raises KeyError with valid-keys message if form_type is not in
+    R_FORM_BY_FORM_TYPE. Raises NotImplementedError for entries whose
+    r_form is NaN (literature value not yet pinned). Emits a one-time
+    UserWarning per process if the resolved entry is cw_validated=False.
+
+    UserWarning is intentionally distinct from RuntimeWarning so that
+    PR 23's filterwarnings = error::RuntimeWarning config does not error
+    on legitimate out-of-envelope use of plywood/plastic_liner forms.
+    """
+    key = getattr(construction, "form_type", "steel")
+    if key not in R_FORM_BY_FORM_TYPE:
+        valid = ", ".join(sorted(R_FORM_BY_FORM_TYPE.keys()))
+        raise KeyError(
+            f"form_type={key!r} not in R_FORM_BY_FORM_TYPE; valid: {valid}"
+        )
+    entry = R_FORM_BY_FORM_TYPE[key]
+    if np.isnan(entry.r_form):
+        raise NotImplementedError(
+            f"form_type={key!r} R_form not yet pinned from literature. "
+            f"Source note: {entry.source}"
+        )
+    if not entry.cw_validated and key not in _warned_form_types:
+        warnings.warn(
+            f"form_type={key!r} uses an out-of-envelope R_form value "
+            f"({entry.source}). Engine v3 is validated only for steel "
+            f"forms. See docs/engine_v3_release_notes.md.",
+            UserWarning,
+            stacklevel=2,
+        )
+        _warned_form_types.add(key)
+    return entry.r_form
 
 
 # ============================================================
@@ -498,15 +579,20 @@ def h_top_series(wind_m_s_max: float, blanket_R_imp: float) -> float:
     return 1.0 / (1.0 / h_conv + R_blanket_SI)
 
 
-def h_side_convective(wind_m_s_max: float, blanket_R_imp: float = 0.0) -> float:
+def h_side_convective(
+    wind_m_s_max: float,
+    blanket_R_imp: float = 0.0,
+    r_form_contact: float = R_FORM_CONTACT_SI,
+) -> float:
     """Effective heat transfer coefficient at the concrete form face.
 
     Physical path: ambient → convection → form face → concrete.
-    R_FORM_CONTACT_SI is the steel form + wet-concrete contact film resistance
-    (0.0862 m²·K/W, validated as real contact physics by Sprint 2 PR 6
-    R_form=0 diagnostic — Corner RMS 8.85°F vs 4.08°F with production value).
-    The cure blanket is a top-surface treatment only; blanket_R_imp is accepted
-    for call-site compatibility but does not affect the side BC result.
+    r_form_contact is the form + wet-concrete contact film resistance
+    (default R_FORM_CONTACT_SI = 0.0862 m²·K/W for steel, validated as real
+    contact physics by Sprint 2 PR 6 R_form=0 diagnostic — Corner RMS 8.85°F
+    vs 4.08°F with production value). The cure blanket is a top-surface
+    treatment only; blanket_R_imp is accepted for call-site compatibility but
+    does not affect the side BC result.
 
     Sprint 2 PR 8 added ACI 207.2R Eq 27 orientation-dependent convection via
     h_forced_convection_vertical(); this helper remains for the convective-path
@@ -516,12 +602,14 @@ def h_side_convective(wind_m_s_max: float, blanket_R_imp: float = 0.0) -> float:
     ----------
     wind_m_s_max : float  Average-max wind speed m/s.
     blanket_R_imp : float  Accepted but ignored; blanket is on top only.
+    r_form_contact : float  Contact resistance m²·K/W. Defaults to steel value;
+                            production path passes resolve_r_form(construction).
 
     Returns
     -------
     float  Effective side-surface heat transfer coefficient W/(m²·K).
     """
-    return 1.0 / (1.0 / h_forced_convection(wind_m_s_max) + R_FORM_CONTACT_SI)
+    return 1.0 / (1.0 / h_forced_convection(wind_m_s_max) + r_form_contact)
 
 
 # Adapted from reference/thermal_engine_v2.py:197-203.
@@ -1369,8 +1457,6 @@ def solve_hydration_2d(
         _top_row_is_air = grid.is_air[0, :]
         # Legacy mask for top_bc_only / v2_equivalent (soil beside mat)
         _top_row_is_soil = (grid.material_id[0, :] == 2)
-        # M4 side BC: h_side for the form face (PR 4: pure forced convection)
-        _h_side = h_side_convective(environment.cw_ave_max_wind_m_s, _r_blanket)
         # PR 6: pure convective h for the T_outer_form Newton solve (no R_form baked in)
         # PR 8: ACI 207.2R Eq 27 — vertical face uses h_forced_convection_vertical, not horizontal
         _h_conv_vert = h_forced_convection_vertical(environment.cw_ave_max_wind_m_s)
@@ -1385,6 +1471,12 @@ def solve_hydration_2d(
         # Explicit vertical_solar_factor takes precedence for sweeps/calibration/ablation.
         _F_vert_override = getattr(construction, "vertical_solar_factor", None)
         _F_vert = _F_vert_override if _F_vert_override is not None else _F_vert_from_orient
+        # Resolved once per scenario; reused as a local in all hot-path Newton iterations below.
+        # resolve_r_form uses getattr fallback "steel" for stubs without form_type.
+        # Pattern mirrors _F_vert_from_orient resolution (ADR-10 / ADR-05 precedent).
+        _r_form_contact = resolve_r_form(construction)
+        # M4 side BC: h_side for the form face (PR 4: pure forced convection)
+        _h_side = h_side_convective(environment.cw_ave_max_wind_m_s, _r_blanket, _r_form_contact)
 
     # ------------------------------------------------------------------ #
     # B. Soil and blanket material properties                              #
@@ -1910,8 +2002,8 @@ def solve_hydration_2d(
                 _T_eff_sky_C = F_SKY_VERT * _T_sky_C_t + (1.0 - F_SKY_VERT) * _T_amb_C
                 _T_ref_K     = 0.5 * (_T_side_c + _T_eff_sky_C) + 273.15
                 _h_rad0      = 4.0 * _emis_side * STEFAN_BOLTZMANN * _T_ref_K ** 3
-                _denom_f     = _h_conv_vert + _h_rad0 + 1.0 / R_FORM_CONTACT_SI
-                _num_f       = (_T_side_c / R_FORM_CONTACT_SI
+                _denom_f     = _h_conv_vert + _h_rad0 + 1.0 / _r_form_contact
+                _num_f       = (_T_side_c / _r_form_contact
                                 + _h_conv_vert * _T_amb_C
                                 + _h_rad0 * _T_eff_sky_C
                                 + _alpha_sol_side * _F_vert * _G_t * _daytime)
@@ -1932,7 +2024,7 @@ def solve_hydration_2d(
                           * (_T_o_K ** 4 - _T_sky_K ** 4)
                         + _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
                           * (_T_o_K ** 4 - _T_gnd_K ** 4)
-                        - (_T_side_c - _T_outer_form_C) / R_FORM_CONTACT_SI
+                        - (_T_side_c - _T_outer_form_C) / _r_form_contact
                         - _alpha_sol_side * _F_vert * _G_t * _daytime
                     )
                     _dF_lw = (
@@ -1941,12 +2033,12 @@ def solve_hydration_2d(
                           * _T_o_K ** 3
                         + 4.0 * _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN
                           * (1.0 - F_SKY_VERT) * _T_o_K ** 3
-                        + 1.0 / R_FORM_CONTACT_SI
+                        + 1.0 / _r_form_contact
                     )
                     _T_outer_form_C = _T_outer_form_C - _F_lw / _dF_lw
 
                 # Heat flux positive = OUT of concrete (T_conc > T_outer means heat leaves)
-                _q_side_total = -(_T_outer_form_C - _T_side_c) / R_FORM_CONTACT_SI
+                _q_side_total = -(_T_outer_form_C - _T_side_c) / _r_form_contact
             else:
                 # No sky data: T_outer ≈ T_conc, LW path off
                 _T_outer_form_C = _T_side_c.copy()
@@ -2017,7 +2109,7 @@ def solve_hydration_2d(
             # corner reuses _T_outer_C[_ic] at line 1806. PR 7 activates solar term.
             if _T_sky_arr is not None and len(_T_sky_arr) > 0 and _env_hours is not None:
                 _T_outer_form_corner_C = float(_T_outer_form_C[0])
-                _q_s = -(_T_outer_form_corner_C - _T_c) / R_FORM_CONTACT_SI
+                _q_s = -(_T_outer_form_corner_C - _T_c) / _r_form_contact
             else:
                 _q_s = _h_conv_vert * (_T_c - _T_amb_C)
 
@@ -2189,8 +2281,8 @@ def solve_hydration_2d(
                         _T_eff_sky_C_s = F_SKY_VERT * _T_sky_C_s + (1.0 - F_SKY_VERT) * _T_amb_s_C
                         _T_ref_K_s     = 0.5 * (_T_side_c_s + _T_eff_sky_C_s) + 273.15
                         _h_rad0_s      = 4.0 * _emis_side * STEFAN_BOLTZMANN * _T_ref_K_s ** 3
-                        _denom_s       = _h_conv_vert + _h_rad0_s + 1.0 / R_FORM_CONTACT_SI
-                        _num_s         = (_T_side_c_s / R_FORM_CONTACT_SI
+                        _denom_s       = _h_conv_vert + _h_rad0_s + 1.0 / _r_form_contact
+                        _num_s         = (_T_side_c_s / _r_form_contact
                                           + _h_conv_vert * _T_amb_s_C
                                           + _h_rad0_s * _T_eff_sky_C_s
                                           + _alpha_sol_side * _F_vert * _G_s * _daytime_s)
@@ -2209,7 +2301,7 @@ def solve_hydration_2d(
                                   * (_T_o_K_s ** 4 - _T_sky_K_s ** 4)
                                 + _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN * (1.0 - F_SKY_VERT)
                                   * (_T_o_K_s ** 4 - _T_gnd_K_s ** 4)
-                                - (_T_side_c_s - _T_outer_form_s) / R_FORM_CONTACT_SI
+                                - (_T_side_c_s - _T_outer_form_s) / _r_form_contact
                                 - _alpha_sol_side * _F_vert * _G_s * _daytime_s
                             )
                             _dF_s = (
@@ -2218,7 +2310,7 @@ def solve_hydration_2d(
                                   * _T_o_K_s ** 3
                                 + 4.0 * _emis_side * EMIS_GROUND * STEFAN_BOLTZMANN
                                   * (1.0 - F_SKY_VERT) * _T_o_K_s ** 3
-                                + 1.0 / R_FORM_CONTACT_SI
+                                + 1.0 / _r_form_contact
                             )
                             _T_outer_form_s = _T_outer_form_s - _F_s / _dF_s
                         _T_o_K_s = _T_outer_form_s + 273.15

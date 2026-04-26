@@ -349,13 +349,17 @@ baseline.
 
 **Scope**:
 - R5: parameterize R_form by form material
-  (steel/plywood/plastic-liner) via new `CWConstruction.form_type`
-  field. Steel value is 0.0862 m²·K/W (ADR-04 reinforced by PR 20
-  evaluation; R_form=0.060 blocked by MIX-02 kinetics-driven
-  contradiction). Plywood and plastic-liner values from ACI 347 /
-  contact-resistance literature; not validated against CW (no exports
-  for those forms in the current 14-mix library). R5 does NOT attempt
-  to fix the MIX-02 cluster contradiction (kinetics-driven; routes to
+  (steel/plywood/plastic-liner) via `CWConstruction.form_type`
+  field. The field pre-exists on the dataclass (loader populates from
+  CW input.dat index 432); PR 22 wires consumption via
+  `resolve_r_form()` resolver replacing the hardcoded
+  `R_FORM_CONTACT_SI` constant in the engine. Steel value is 0.0862
+  m²·K/W (ADR-04 reinforced by PR 20 evaluation; R_form=0.060 blocked
+  by MIX-02 kinetics-driven contradiction). Plywood 0.17 m²·K/W from
+  ACI 306R-88 Table 7.3.5 / §7.3 (cw_validated=False,
+  OUT-OF-ENVELOPE). Plastic-liner value unpinned (no defensible
+  source found; raises NotImplementedError). R5 does NOT attempt to
+  fix the MIX-02 cluster contradiction (kinetics-driven; routes to
   hydration series).
 - R7: suppress cosmetic `RuntimeWarning: invalid value encountered in
   divide` at harmonic-mean k-divide (`thermal_engine_2d.py:1619, 1624`).
@@ -414,7 +418,7 @@ and a status (open / mitigated / accepted).
 | R2 | F_VERT_BY_ORIENTATION stub values (south=0.35, east/west=0.42, north=0.20) are geometric guesses, unvalidated | Sprint 6+ | Deferred — entire 14-mix library uses form_orientation="unknown"; non-unknown orientations need new CW exports before R2 is testable |
 | R3 | First-48hr hydration-rise shape divergence between engine and CW; likely requires dual-peak model | Sprint 5 | Accepted (deferred) |
 | R4 | Barber soil parameters (lag, damping) chosen from literature; may not match CW's internal soil model | Sprint 4 PR 17 | **Closed** (tag pr-17-complete). Defaults set to soil_lag_hrs=0.0, soil_damping=1.0 (no-op pair; reduces to T_amb behavior). Helper code retained for future cold-climate data. Reference §7.5.2 (no climate variation in library) and Sprint 3 sweep (damping unidentifiable on MIX-01). ADR-08 updated. |
-| R5 | R_FORM_CONTACT_SI=0.0862 hardcoded assuming steel form; customer pilots may use plywood or plastic-lined forms | Sprint 6 | Open |
+| R5 | R_FORM_CONTACT_SI=0.0862 hardcoded assuming steel form; customer pilots may use plywood or plastic-lined forms | Sprint 6 PR 22 | **Closed** (Sprint 6 PR 22). Steel value 0.0862 unchanged (ADR-04 reinforced by PR 20). Plywood 0.17 m²·K/W added (ACI 306R-88 Table 7.3.5/§7.3, `cw_validated=False`, OUT-OF-ENVELOPE). Plastic_liner value unpinned (no defensible source found; raises `NotImplementedError`). The MIX-02 cluster contradiction is hydration-series scope (§8.2 finding #1), explicitly not addressed here. |
 | R6 | Engine tested on half-mat geometry only; behavior on full-mat, slab, or column geometries unvalidated | Sprint 6+ | Open |
 | R7 | Cosmetic RuntimeWarning at harmonic-mean k-divide masks potential future numerical issues | Sprint 6 | Mitigated via np.where guard; cleanup deferred |
 | R8 | Hydration model uses CW's parameters (τ, β, α_u, Ea, Hu) directly; if those parameters are miscalibrated in CW, our engine inherits the error | Sprint 4–5 | Accepted (inherited by design) |
@@ -445,6 +449,17 @@ outer surface with 4 substitutions: R_form (contact film), F_SKY_VERT
 physical contact resistance (steel form + wet concrete film per ACI
 347), not legacy calibration. Validated via R_form=0 ablation: Corner
 RMS 8.85°F with R_form=0 vs 4.08°F with 0.0862.
+
+*Sprint 6 PR 22 amendment*: The constant is now resolved via
+`R_FORM_BY_FORM_TYPE[form_type]` through `resolve_r_form(construction)`
+rather than read as a module constant. Steel value 0.0862 unchanged
+(PR 20 reinforced). Plywood (0.17 m²·K/W, ACI 306R-88 Table 7.3.5/§7.3)
+and plastic_liner (value unpinned, raises `NotImplementedError`) added
+with `cw_validated=False`, marked OUT-OF-ENVELOPE in engine v3 release
+notes. The `FormTypeRForm` dataclass carries the `cw_validated` flag +
+`source` citation as the structural way to hold "documented but
+unvalidated" form types forward. R_FORM_CONTACT_SI module attribute
+retained as deprecated alias for back-compat with diagnostic harnesses.
 
 **ADR-05 (Sprint 2 PR 8)**: F_VERT_BY_ORIENTATION lookup as primary
 path; CWConstruction.vertical_solar_factor is optional override. F_vert
@@ -486,6 +501,24 @@ canonical example of why the rule is admission-shaped, not term-shaped).
 Future thermal sprints reuse this screen; the Reference set carried
 into a sprint may change, in which case the 1.5× worst-case thresholds
 recompute against that sprint's Reference set.
+
+**ADR-10 (Sprint 6 PR 22)**: `form_type` is normalized to lowercase at
+the loader trust boundary (`cw_scenario_loader.py`, `parse_cw_dat`).
+Engine-side lookup keys in `R_FORM_BY_FORM_TYPE` are lowercase. The
+loader calls `.strip().lower()` on the raw CW input.dat string at parse
+time, before the value is assigned to `CWConstruction.form_type`. The
+dataclass default is also lowercase (`"steel"`).
+
+Rationale: trust-boundary discipline — one canonical form decided once,
+at the boundary between CW's text format and the engine's typed Python.
+This prevents case-mismatch lookup failures as new form types are added.
+
+Cites ADR-05's `F_VERT_BY_ORIENTATION` lookup as precedent (its keys
+are lowercase strings: `"south"`, `"east"`, `"unknown"`, etc.). Note
+distinction: ADR-05's lowercase came from the authored dict, not a
+normalization step. PR 22 makes the lowercase convention explicit and
+enforces it uniformly at the trust boundary so future loaders do not
+need to remember to author lowercase keys.
 
 ---
 
