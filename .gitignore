@@ -19,3 +19,4 @@ calibrate_f_vert.py
 
 # Local-only sprint diagnostic scripts (see Sprint 2 retrospective)
 verify_pr*.py
+.gstack/
