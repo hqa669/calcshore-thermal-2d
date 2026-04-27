@@ -1,0 +1,56 @@
+========================================================================
+CalcShore engine v3 -- kinetics isolation test
+MIX-01 adiabatic, T0 = 73 deg F, duration = 168 hr
+========================================================================
+
+Mix kinetics parameters consumed:
+  Ea       =   26457.95   J/mol
+  tau      =    29.4010   hr
+  beta     =     0.8950
+  alpha_u  =    0.75852
+  Hu       =   424143.1   J/kg
+  Cc total =      575.0   lb/yd^3 (39.1% SCM)
+
+Spatial-uniformity check (adiabatic invariant):
+  max(T) - min(T) over field at t_final = 0.000e+00 deg F
+  (should be ~0 to floating-point precision)
+
+Comparison against CW reference (2016 samples):
+
+  Peak T at t=168 hr:
+    engine   =  153.569 deg F
+    CW       =  149.252 deg F
+    delta    =   +4.317 deg F
+
+  RMS (engine - CW) over [0, 168] hr:
+    rms      =    3.602 deg F
+    max|delta|=    4.333 deg F
+
+  Time to T = 100 deg F:
+    engine   =   20.426 hr
+    CW       =   21.196 hr
+    delta    =   -0.769 hr
+
+  Time to T = 130 deg F:
+    engine   =   43.471 hr
+    CW       =   48.151 hr
+    delta    =   -4.680 hr
+
+Gate dispositions (S0-style):
+
+  [FAIL]  |peak delta| <= 1.0 F           observed: |+4.317| F
+  [FAIL]  RMS          <= 1.0 F           observed: 3.602 F
+  [PASS]  |delta t_100|<= 2.0 h           observed: |-0.769| h
+  [FAIL]  |delta t_130|<= 2.0 h           observed: |-4.680| h
+
+========================================================================
+OVERALL: FAIL
+========================================================================
+
+Failure signature analysis (per passdown):
+  - Wrong peak amplitude  -> Hu, Cc, alpha_u, or Cp(alpha,T)
+  - Wrong inflection time -> tau, beta
+  - Wrong steepness       -> Ea (Arrhenius)
+  - Wrong asymptote       -> alpha_u
+Also check: input.dat parsing, T_ref=296.15 K, Imperial
+-> SI conversions, te integration scheme.
