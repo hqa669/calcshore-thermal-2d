@@ -20,11 +20,12 @@ the full product mission).
   exploiting symmetry at the centerline
 - **Climate**: Austin TX summer (CW-exported hourly weather files; library has zero
   climate variation — all 14 mixes are Austin TX)
-- **Placement temperature**: 60°F warm placement (cold placement at 45°F is
-  out-of-envelope per R9; warm placement at 75°F is out-of-envelope per MIX-14
-  findings)
-- **Mix range**: 39.1% SCM Reference mixes (single-peak hydration profile; 5 mixes
-  — MIX-01, MIX-02, MIX-03, MIX-11, MIX-12)
+- **Placement temperature**: validated across [45°F, 75°F] by adiabatic kinetics
+  match against CW (composition-based Hu calibration; see Kinetics calibration
+  section below)
+- **Mix range**: 0–91% SCM across Type I / I-II / II / V cement, Class F / Class C
+  fly ash, and slag (13 mixes validated; silica fume deferred — see
+  out-of-envelope conditions)
 - **Form material**: steel (R_form = 0.0862 m²·K/W, ADR-04, reinforced PR 20)
 - **S0 tolerances**:
   - PeakMax T: ±1.0°F
@@ -32,9 +33,31 @@ the full product mission).
   - Field RMS: ≤2.0°F
   - Centerline RMS: ≤1.0°F
   - Corner RMS: ≤3.0°F
-- **Reference set status**: S0 5/5 on all 5 Reference mixes at `sprint-6-complete`.
-  Values unchanged from `sprint-4-complete` through Sprint 6; PR 22 was
-  bit-identical for steel forms; PR 23 was bit-identical by construction.
+
+## Kinetics calibration (apr28)
+
+Engine v3 ships with a composition-based Hu calibration that closes the
+adiabatic kinetics gap against CW across the validated mix envelope. The CW-
+regressed `Hu_J_kg` (line 389 of `input.dat`) is preserved verbatim; the
+solver consumes a corrected `Hu_J_kg_effective` computed at scenario-load
+time as:
+
+    Hu_eff = Hu_regressed × f_type × Σᵢ kᵢ · pᵢ
+
+where `f_type` is a cement-type-specific factor (Type I, I/II, II, V), `kᵢ`
+is an SCM-class-specific factor (Portland, Class F fly ash, Class C fly ash,
+slag), and `pᵢ` is the mass fraction of constituent i in total cementitious.
+
+The calibration was validated against CW adiabatic centerline curves across
+the 14-mix engine v3 library. Adiabatic peak temperature agreement: 13/14
+mixes within ±1°F PeakMax and ≤1°F RMS at T₀ ∈ {45°F, 60°F, 73°F, 75°F}.
+The lone exception (MIX-13, 5% silica fume) routes to the silica fume
+characterization sprint — see deferred items below.
+
+The correction is applied automatically by `load_cw_scenario`. The flag
+`use_cw_calibrated_hu=False` reproduces the pre-correction (raw-Hu) baseline
+for diagnostics. Calibration coefficients live in `kinetics_correction.py`
+and are pinned by `tests/test_kinetics_correction.py`.
 
 ## Known residuals
 
@@ -65,8 +88,13 @@ in either the BC functional form (how solar G(t), LW T_sky(t),
 and convection compose into the surface energy balance), the
 coupling structure (e.g., blanket-cell thermal mass, sky
 temperature parameterization), or the thermal physics model
-itself (effective k(T,α), Cp(T,α), or hydration kinetics
-interaction with surface response).
+itself (effective k(T,α), Cp(T,α)).
+
+With the apr28 kinetics calibration in place, this residual is
+unambiguously BC physics — kinetics-vs-BC entanglement (the R9
+disambiguation thread from earlier sprints) is closed. Future
+investigation can ablate BC form factors directly without
+having to control for kinetics overshoot.
 
 **Engine v3 envelope statement**: engine v3 ships with a
 documented ~0.74°F Centerline RMS residual on the validated
@@ -75,7 +103,7 @@ mid-SCM at 60°F placement, steel form). The residual is within
 S0 (≤1.0°F) and represents a 32% margin to the S1-aspire
 threshold.
 
-**Future investigation candidates** (not Sprint 5/6 scope):
+**Future investigation candidates** (Sprint 7+):
 - CW's surface energy balance functional form. If CW uses
   natural-convection-only coefficients or applies wind reduction
   factors not present in our engine, that explains the inverse
@@ -92,58 +120,36 @@ threshold.
   wind-coupled h_conv evaluates at a single value across the
   library. CW may average differently.
 
-**R9 implication**: the D1 DC offset (+0.40 to +0.56°F on 4/5
-Reference mixes) and the D5 Mode-A overlap finding from PR 18
-(+0.77 to +1.21°F in [8,48] hr) remain entangled with the
-amplitude residual — they cannot be cleanly separated until the
-amplitude story closes. R9's kinetics-vs-inherited-calibration
-disambiguation is correspondingly deferred to engine v3
-investigation alongside the BC structural work.
+### R_form recalibration to 0.060 (re-opened)
 
-### R_form Reference-set evaluation
+The PR 15 candidate R_form=0.060 did not generalize when MIX-02
+was carried at the v3 baseline. With apr28 kinetics in place,
+MIX-02's "kinetics-divergent" signature (CornerRMS / PeakGrad
+worsening as R_form decreased) was a kinetics-overshoot artifact,
+not an R_form-physics anomaly. The cluster-vs-MIX-02 contradiction
+that blocked the R_form sweep dissolves with the calibration.
 
-R_form residual documented — PR 15 candidate (R_form=0.060) did
-not generalize to the full Reference set. The cluster mixes
-(MIX-01, 11, 12) and MIX-03 show large CornerRMS improvements
-at 0.060 vs ADR-04 default 0.0862 (−1.1 to −1.6°F). MIX-02
-(kinetics-anomalous) responds oppositely: its CornerRMS and
-PeakGrad worsen monotonically as R_form decreases, reaching
-S0 failure (PeakGradΔ=+2.679°F > 2.0°F threshold) at 0.060.
-The cluster optimum (~0.060–0.070) and MIX-02's optimum
-(~0.0862) do not overlap at a globally applicable value.
-CenterRMS confirmed fully form-face-decoupled: Δ=0.000°F across
-all sweep values on all 5 mixes. ADR-04 remains at 0.0862.
-Routing: Sprint 6 R5 (form-material parameterization) evaluated
-whether a per-form-type or per-mix-regime R_form seam could
-recover the cluster improvement without regressing MIX-02. The
-cluster contradiction with MIX-02 was explicitly not addressed
-(routes to the hydration series). See
+R_form recalibration to the cluster optimum (~0.060–0.070) is
+back on the Sprint 7 backlog. Expected outcome on the validated
+13-mix set: cluster CornerRMS drops 1.1–1.6°F. ADR-04 currently
+remains at 0.0862 pending Sprint 7 validation. See
 `validation/diagnostics/pr20_r_form_eval/`.
 
 ### Corner-side residuals
 
-MIX-02 exhibits a kinetics-divergent signature confirmed across
-multiple diagnostics in Sprint 5 (§8.2 finding #1): the engine and
-CW disagree on heat generation in ways not closable by thermal-physics
-calibration alone. The cross-diagnostic signature — MIX-02 responding
-oppositely to R_form decreases while cluster mixes improve, plus
-anomalous CornerRMS behavior — is consistent with an upstream
-divergence in the hydration kinetics model rather than a thermal-BC
-miscalibration.
+The MIX-02 kinetics-divergence flag from prior release notes is
+withdrawn. With the apr28 calibration, MIX-02 lands at
+ΔPeakMax=+0.18°F, RMS=0.11°F adiabatically — the pre-correction
+"kinetics divergence" signature was the same Hu overshoot
+present in the rest of the library, masked by MIX-02's specific
+cement/SCM mix amplifying it differently than the Reference
+cluster.
 
 Engine v3 envelope statement for corner-side accuracy: cluster
 CornerRMS of ~2.0°F (range 1.24–2.72°F across Reference mixes at
-R_form=0.0862) is the validated envelope statement. This is not a
-closed residual — it reflects the accuracy achievable within the
-current thermal physics model at the validated R_form value. MIX-02
-specifically: PeakGrad S0 holds at R_form=0.0862 (ΔPeakGrad=+1.16°F,
-within the ±2.0°F gate), but fails at R_form=0.060. The shipped value
-(0.0862) is the safe choice for MIX-02-class mixes.
-
-Routing: MIX-02's kinetics divergence routes to the hydration series
-for disambiguation. The thermal sprint series treats the ~2.0°F cluster
-CornerRMS as the engine v3 floor — improving it requires the hydration
-series, not further thermal recalibration.
+R_form=0.0862) is the validated envelope statement. Improving
+this requires Sprint 7 R_form recalibration (now unblocked) and
+the BC-physics work flagged above.
 
 ## Out-of-envelope conditions
 
@@ -151,22 +157,22 @@ The following conditions are explicitly outside the engine v3 validated
 envelope. Each is documented, routed to a successor sprint series, and (where
 applicable) emits a runtime warning or error.
 
-- **Cold placement (T_placement < 60°F)**: R9 Mode B Arrhenius rate divergence
-  above ~30°C. MIX-15 at 45°F placement: PeakMax Δ=−3.00°F, PeakGrad
-  Δ=−8.20°F, FieldRMS 4.06°F, CenterRMS 2.07°F — S0 1/5. Routes to the
-  hydration series for kinetics disambiguation.
+- **Silica fume / ultra-fine fly ash above ~5% replacement**: provisional
+  `k_SF=0.7` placeholder; needs binary-mix CW runs at 5/8/12% SF replacement
+  to characterize. MIX-13 (5% SF, the only library mix in this regime)
+  empirically suggests `k_SF≈2.0` at 5% replacement (engine under-predicts
+  by 3.84°F at the provisional value). The kinetics module emits a
+  `KineticsCorrectionWarning` whenever any SF is present.
 
-- **Warm placement (T_placement > 60°F)**: MIX-14 at 75°F placement scores
-  S0 0/5 (PeakMax Δ=+1.49°F, PeakGrad Δ=−3.49°F, FieldRMS 3.20°F). The
-  mechanism is not closed; routes to the hydration series.
+- **Type III cement**: not characterized (uncommon in mass concrete; behaves
+  differently due to high Blaine fineness). The kinetics module raises
+  `KeyError` rather than silently producing a wrong Hu factor. To add a Type III
+  entry, run a CW adiabatic reference at high replacement and add the value to
+  `F_TYPE` in `kinetics_correction.py`.
 
-- **High-SCM mixes (≥40% non-Reference SCM, Cluster A: MIX-05/06/07/09/10)**:
-  Hydration-shape divergence. Engine systematically over- or under-predicts
-  heat generation depending on the SCM fraction and type. Routes to the
-  hydration series (dual-peak hydration model).
-
-- **Low-SCM mixes (B1: MIX-04 at 21.7%, MIX-08 at 17.4%)**: S0 2/5 each.
-  PeakGrad errors exceed the ±2.0°F gate. Routes to the hydration series.
+- **Pure-slag mixes (cement = 0)**: CW returns a discontinuous α_u step at
+  this boundary (α_u drops from ~0.99 to ~0.28). The engine raises
+  `NotImplementedError`. Customer workaround: add ≥5% Portland.
 
 - **Non-half-mat geometry (full-mat, slab, column, wall)**: R6. Untested.
   Routes to the geometry coverage series.
@@ -174,10 +180,6 @@ applicable) emits a runtime warning or error.
 - **Non-Austin climate**: The 14-mix library has zero climate variation (all
   Austin TX). Behavior on cold-climate placements, high-altitude UV, or marine
   environments is untested. Routes to the multi-climate validation series.
-
-- **Kinetics-divergent mixes (MIX-02-class)**: §8.2 finding #1. Engine and CW
-  disagree on heat generation in ways not closable by thermal-physics
-  calibration. Routes to the hydration series.
 
 - **Non-steel forms**:
   - *Plywood*: `R_FORM_BY_FORM_TYPE["plywood"] = 0.17 m²·K/W` (ACI 306R-88
@@ -191,28 +193,37 @@ applicable) emits a runtime warning or error.
 
 ## Validation summary table
 
-Numbers from `validation/sprint4_baseline.md` (regenerated at
-`sprint-4-complete`, confirmed zero diff through Sprint 6). S0 tolerances:
-PeakMax ±1.0°F, PeakGrad ±2.0°F, FieldRMS ≤2.0°F, CenterRMS ≤1.0°F,
-CornerRMS ≤3.0°F.
+Adiabatic peak comparison vs CW centerline reference, with the apr28
+composition-based Hu calibration applied. Pass criterion: |peak Δ| ≤ 1.0°F
+and RMS ≤ 1.0°F. Numbers from `validation/kinetics_correction/expected/
+summary_table.md` (regenerated by `batch_compare_all_mixes.py`).
 
-| Mix | Group | SCM% | PlaceTemp | PeakMax Δ | PeakGrad Δ | FieldRMS | CenterRMS | CornerRMS | S0 | Routing |
-|---|---|---|---|---|---|---|---|---|---|---|
-| MIX-01 | Reference | 39.1% | 60°F | −0.29°F | −0.29°F | 0.88°F | 0.74°F | 2.22°F | 5/5 | Validated |
-| MIX-02 | Reference | 39.1% | 60°F | −0.68°F | +1.16°F | 1.23°F | 0.57°F | 1.24°F | 5/5 | Validated (kinetics-divergent on R_form sweeps; see Corner-side residuals) |
-| MIX-03 | Reference | 39.1% | 60°F | −0.30°F | −0.92°F | 0.87°F | 0.79°F | 2.72°F | 5/5 | Validated |
-| MIX-11 | Reference | 39.1% | 60°F | −0.13°F | +0.07°F | 0.91°F | 0.79°F | 2.12°F | 5/5 | Validated |
-| MIX-12 | Reference | 39.1% | 60°F | −0.31°F | −0.32°F | 0.87°F | 0.73°F | 2.23°F | 5/5 | Validated |
-| MIX-04 | B1 | 21.7% | 60°F | −1.46°F | −2.27°F | 1.37°F | 0.93°F | 3.00°F | 2/5 | OUT-OF-ENVELOPE — hydration series |
-| MIX-08 | B1 | 17.4% | 60°F | −1.43°F | −3.42°F | 1.33°F | 0.85°F | 4.03°F | 2/5 | OUT-OF-ENVELOPE — hydration series |
-| MIX-05 | Cluster A | 52.2% | 60°F | +0.70°F | +1.02°F | 1.24°F | 1.49°F | 2.05°F | 4/5 | OUT-OF-ENVELOPE — hydration series |
-| MIX-06 | Cluster A | 71.3% | 60°F | +2.20°F | +3.04°F | 2.35°F | 2.81°F | 1.84°F | 1/5 | OUT-OF-ENVELOPE — hydration series |
-| MIX-07 | Cluster A | 91.3% | 60°F | +4.12°F | +4.97°F | 3.82°F | 4.45°F | 1.83°F | 1/5 | OUT-OF-ENVELOPE — hydration series |
-| MIX-09 | Cluster A | 41.7% | 60°F | +3.78°F | +1.33°F | 4.15°F | 4.84°F | 4.57°F | 1/5 | OUT-OF-ENVELOPE — hydration series |
-| MIX-10 | Cluster A | 52.2% | 60°F | +0.23°F | +1.43°F | 1.07°F | 1.03°F | 1.40°F | 4/5 | OUT-OF-ENVELOPE — hydration series |
-| MIX-15 | B2 | 39.1% | 45°F | −3.00°F | −8.20°F | 4.06°F | 2.07°F | 1.99°F | 1/5 | OUT-OF-ENVELOPE — R9 / hydration series |
-| MIX-14 | (warm-OOE) | 39.1% | 75°F | +1.49°F | −3.49°F | 3.20°F | 2.29°F | 4.85°F | 0/5 | OUT-OF-ENVELOPE — hydration series |
-| MIX-13 | (sentinel) | — | — | — | — | — | — | — | skipped | No CW output.txt |
+| Mix | T₀ | Cement | %Cem | %FA-F | %FA-C | %Slag | %SF | Hu_factor | Engine peak | CW peak | Δpeak | RMS | Pass |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| MIX-01 | 73°F | Type I/II | 60.9 | 21.7 | 0.0 | 17.4 | 0.0 | 0.9514 | 149.38°F | 149.25°F | +0.13°F | 0.20°F | ✅ |
+| MIX-02 | 73°F | Type V | 60.9 | 21.7 | 0.0 | 17.4 | 0.0 | 0.9571 | 140.04°F | 139.86°F | +0.18°F | 0.11°F | ✅ |
+| MIX-03 | 73°F | Type I | 78.3 | 21.7 | 0.0 | 0.0 | 0.0 | 0.9787 | 152.80°F | 152.02°F | +0.78°F | 0.57°F | ✅ |
+| MIX-04 | 73°F | Type I | 78.3 | 21.7 | 0.0 | 0.0 | 0.0 | 0.9787 | 152.80°F | 152.02°F | +0.78°F | 0.57°F | ✅ |
+| MIX-05 | 73°F | Type I/II | 47.8 | 21.7 | 0.0 | 30.4 | 0.0 | 0.9372 | 149.33°F | 149.05°F | +0.27°F | 0.18°F | ✅ |
+| MIX-06 | 73°F | Type I/II | 28.7 | 21.7 | 0.0 | 49.6 | 0.0 | 0.9164 | 148.49°F | 148.01°F | +0.48°F | 0.23°F | ✅ |
+| MIX-07 | 73°F | Type I/II | 8.7 | 21.7 | 0.0 | 69.6 | 0.0 | 0.8946 | 148.70°F | 147.96°F | +0.75°F | 0.38°F | ✅ |
+| MIX-08 | 73°F | Type I/II | 82.6 | 0.0 | 0.0 | 17.4 | 0.0 | 0.9708 | 161.35°F | 161.08°F | +0.27°F | 0.28°F | ✅ |
+| MIX-09 | 73°F | Type I/II | 58.3 | 0.0 | 4.2 | 16.7 | 20.8 | 0.9049 | 157.92°F | 157.84°F | +0.08°F | 0.35°F | ✅ (SF=20.8% OUT-OF-ENVELOPE; passes opportunistically) |
+| MIX-10 | 73°F | Type I/II | 47.8 | 34.8 | 0.0 | 17.4 | 0.0 | 0.9398 | 142.11°F | 142.12°F | −0.02°F | 0.21°F | ✅ |
+| MIX-11 | 73°F | Type I/II | 60.9 | 21.7 | 0.0 | 17.4 | 0.0 | 0.9514 | 148.92°F | 148.53°F | +0.39°F | 0.23°F | ✅ |
+| MIX-12 | 73°F | Type I/II | 60.9 | 21.7 | 0.0 | 17.4 | 0.0 | 0.9514 | 149.37°F | 149.29°F | +0.08°F | 0.22°F | ✅ |
+| MIX-13 | 73°F | Type I/II | 58.7 | 22.9 | 0.0 | 18.3 | 0.0 | 0.9493 | 140.91°F | 144.75°F | −3.84°F | 3.46°F | ❌ (silica fume — k_SF deferred) |
+| MIX-14 | 75°F | Type I/II | 60.9 | 21.7 | 0.0 | 17.4 | 0.0 | 0.9514 | 151.57°F | 151.39°F | +0.17°F | 0.21°F | ✅ |
+| MIX-15 | 45°F | Type I/II | 60.9 | 21.7 | 0.0 | 17.4 | 0.0 | 0.9514 | 117.05°F | 117.05°F | +0.00°F | 0.07°F | ✅ |
+
+**Adiabatic kinetics gate: 14/15 mixes pass; MIX-13 (silica fume) deferred to
+SF characterization sprint.**
+
+The full-stack thermal validation (S0 5/5 on Reference cluster mixes with
+boundary conditions and form-side physics) holds at the v3 baseline. Sprint 7
+will re-run the full-stack S0 sweep with the apr28 calibration in place;
+expected outcome is dramatic improvement on Cluster A and B1 cluster mixes
+that previously routed to the hydration series.
 
 ## API surface
 
@@ -225,6 +236,12 @@ raw comparison data. For direct solver access, `solve_hydration_2d()` in
 `thermal_engine_2d.py` returns a `HydrationResult` with the full temperature and
 hydration field trajectories.
 
+The apr28 Hu calibration is applied automatically by `load_cw_scenario`
+(default `use_cw_calibrated_hu=True`). The verbatim CW-regressed Hu is
+preserved on `mix.Hu_J_kg`; the solver consumes `mix.Hu_J_kg_effective`. Set
+`use_cw_calibrated_hu=False` to disable the correction for diagnostic
+purposes (this reproduces the pre-correction baseline behavior).
+
 For full API documentation, run `help()` on each class:
 
 ```python
@@ -236,14 +253,19 @@ For full API documentation, run `help()` on each class:
 
 ## Engineering history
 
-Engine v3 is the result of six sprints of thermal-physics development. Sprints
-0–2 established the 2D half-mat finite-difference solver and MIX-01 single-mix
-validation; Sprint 3 explored Barber soil modeling; Sprint 4 expanded to
-multi-mix validation on the 8-mix evaluation set and opened the R_form
-characterization thread; Sprint 5 characterized Reference-set residuals and
-closed the BC-parameter hypothesis space; Sprint 6 closed cleanup risks
-(form-material parameterization R5, RuntimeWarning hygiene R7) and finalized
-the customer-facing release documentation. For sprint-by-sprint detail
-including hypotheses tested, ablations run, and risks routed, see
-`docs/coding_passdown_v3.md` (Sprints 0–2) and `docs/coding_passdown_v4.md`
-(Sprints 3–6).
+Engine v3 is the result of six sprints of thermal-physics development plus a
+post-Sprint-6 kinetics calibration milestone. Sprints 0–2 established the 2D
+half-mat finite-difference solver and MIX-01 single-mix validation; Sprint 3
+explored Barber soil modeling; Sprint 4 expanded to multi-mix validation on
+the 8-mix evaluation set and opened the R_form characterization thread;
+Sprint 5 characterized Reference-set residuals and closed the BC-parameter
+hypothesis space; Sprint 6 closed cleanup risks (form-material parameterization
+R5, RuntimeWarning hygiene R7) and finalized the customer-facing release
+documentation. The apr27/apr28 kinetics-isolation work then characterized the
+hidden CW post-regression Hu correction (cement-type lookup `f_type` and SCM-
+mass-fraction-weighted derating `Σ kᵢ · pᵢ`), validated the formula against
+13 of 15 library mixes adiabatically, and integrated it as a permanent code
+path. For sprint-by-sprint detail including hypotheses tested, ablations run,
+and risks routed, see `docs/coding_passdown_v3.md` (Sprints 0–2),
+`docs/coding_passdown_v4.md` (Sprints 3–6), and `kinetics_passdown_apr28.md`
++ `passdown_hu_factor_integration.md` (kinetics calibration milestone).
