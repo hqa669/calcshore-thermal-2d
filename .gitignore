@@ -26,3 +26,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+
+# Diagnostic outputs from plot_engine_vs_cw_centerline.py
+mix*_calibrated.png
+mix*_calibrated.csv
+mix*_raw.png
+raw_hu_baseline.png
+raw_hu_baseline.csv
+engine_vs_cw_centerline_*.png
+engine_vs_cw_centerline_*.csv
