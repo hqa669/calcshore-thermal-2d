@@ -1435,7 +1435,7 @@ def solve_hydration_2d(
     # ------------------------------------------------------------------ #
     # A. Unit conversions (imperial → SI, from mix)                        #
     # ------------------------------------------------------------------ #
-    Hu     = mix.Hu_J_kg                                          # J/kg_cement
+    Hu     = mix.Hu_J_kg_effective                              # J/kg_cement (apr28 calibrated)
     tau    = mix.tau_hrs                                          # hrs
     beta_h = mix.beta                                             # dimensionless
     au     = mix.alpha_u                                          # dimensionless

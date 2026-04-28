@@ -143,10 +143,31 @@ class CWMixDesign:
     alpha_u: float = 0.75852
     Hu_J_kg: float = 424143.0
 
+    # --- composition-based Hu calibration (apr28) ---
+    # Hu_factor_calibrated: factor=1.0 means "no correction applied"
+    #   (i.e. Hu_J_kg_effective == Hu_J_kg). load_cw_scenario populates
+    #   this from kinetics_correction.compute_hu_factor() when
+    #   use_cw_calibrated_hu=True.
+    # Hu_J_kg_effective: the value the solver actually consumes
+    #   (mix.Hu_J_kg_effective, NOT mix.Hu_J_kg). Defaults to Hu_J_kg
+    #   via __post_init__ if left at 0.
+    # Hu_calibration_note: envelope flags from the correction module
+    #   (empty string when in-envelope).
+    Hu_factor_calibrated: float = 1.0
+    Hu_J_kg_effective: float = 0.0
+    Hu_calibration_note: str = ""
+
     # Derived thermal properties
     thermal_conductivity_BTU_hr_ft_F: float = 1.56
     aggregate_Cp_BTU_lb_F: float = 0.20
     CTE_microstrain_F: float = 4.25
+
+    def __post_init__(self):
+        # Default Hu_J_kg_effective to the regressed Hu_J_kg if the caller
+        # didn't explicitly set it. This keeps the invariant that a mix
+        # constructed with no calibration has effective == regressed.
+        if self.Hu_J_kg_effective == 0.0:
+            self.Hu_J_kg_effective = self.Hu_J_kg
 
     @property
     def total_cementitious_lb_yd3(self) -> float:
@@ -744,6 +765,8 @@ def load_cw_scenario(
     weather_dat: Optional[str] = None,
     cw_output_txt: Optional[str] = None,
     cw_ui_overrides: Optional[Dict[str, float]] = None,
+    *,
+    use_cw_calibrated_hu: bool = True,
 ) -> CWScenario:
     """Load a full CW scenario from its three native files.
 
@@ -754,6 +777,15 @@ def load_cw_scenario(
     cw_output_txt : path to CW temp.txt export (optional, for validation)
     cw_ui_overrides : dict with UI-displayed environment averages that cannot
         be inferred from the weather file alone (e.g. {'ave_max_wind_m_s': 10.5})
+    use_cw_calibrated_hu : keyword-only, default True
+        Apply the composition-based Hu calibration (apr28 formula) to
+        the regressed Hu_J_kg. When True, sets mix.Hu_factor_calibrated
+        and mix.Hu_J_kg_effective from kinetics_correction.compute_hu_factor.
+        When False, both remain at defaults (factor=1.0, effective=Hu_J_kg)
+        — diagnostic / pre-correction baseline mode.
+
+        The verbatim CW-regressed `Hu_J_kg` is preserved as-is in either
+        mode; the solver consumes `Hu_J_kg_effective`.
 
     Returns
     -------
@@ -780,6 +812,17 @@ def load_cw_scenario(
     validation = None
     if cw_output_txt is not None and os.path.exists(cw_output_txt):
         validation = parse_cw_temp_output(cw_output_txt)
+
+    # Apply the composition-based Hu calibration (apr28). This layers
+    # on top of the CW-regressed Hu_J_kg without mutating it; the
+    # solver consumes mix.Hu_J_kg_effective.
+    if use_cw_calibrated_hu:
+        from kinetics_correction import compute_hu_factor
+        factor, note = compute_hu_factor(mix)
+        mix.Hu_factor_calibrated = factor
+        mix.Hu_J_kg_effective    = mix.Hu_J_kg * factor
+        mix.Hu_calibration_note  = note
+    # else: dataclass defaults stand (factor=1.0, effective=Hu_J_kg via __post_init__)
 
     return CWScenario(
         mix=mix,
