@@ -41,79 +41,21 @@ import numpy as np
 
 from cw_scenario_loader import load_cw_scenario
 from thermal_engine_2d import build_grid_rectangular, solve_hydration_2d
+from kinetics_correction import compute_hu_factor
 
 
 # ======================================================================
 # Hu calibration (apr28 passdown)
 # ======================================================================
-
-F_TYPE = {
-    "Type I":    0.9982,
-    "Type I/II": 0.9897,
-    "Type II":   0.9870,
-    "Type V":    0.9956,
-}
-
-K_PORTLAND   = 1.0
-K_FLY_ASH_F  = 0.91
-K_FLY_ASH_C  = 0.883
-K_SLAG       = 0.89
-K_SILICA_FUME_PROVISIONAL = 0.7   # apr28: provisional until moderate-replacement runs
-
-
-def compute_hu_factor(mix) -> tuple[float, str]:
-    """
-    Compute the apr28 calibration factor:  f_type × Σᵢ kᵢ · pᵢ
-
-    Returns (factor, note).  `note` is a short flag string for the
-    summary table (empty if everything is in-envelope).
-    """
-    cement_type = (mix.cement_type or "").strip()
-    if cement_type not in F_TYPE:
-        # Try a few common normalizations
-        norm = cement_type.replace("Type", "Type ").replace("  ", " ").strip()
-        if norm in F_TYPE:
-            cement_type = norm
-        else:
-            raise KeyError(
-                f"Cement type {cement_type!r} not in F_TYPE table "
-                f"(known: {list(F_TYPE)})"
-            )
-    f_type = F_TYPE[cement_type]
-
-    cem  = mix.cement_type_I_II_lb_yd3
-    fa_f = mix.fly_ash_F_lb_yd3
-    fa_c = mix.fly_ash_C_lb_yd3
-    slag = mix.ggbfs_lb_yd3
-    sf   = mix.silica_fume_lb_yd3
-    total = cem + fa_f + fa_c + slag + sf
-    if total <= 0:
-        raise ValueError("total cementitious is zero; cannot compute fractions")
-
-    p_cem  = cem  / total
-    p_fa_f = fa_f / total
-    p_fa_c = fa_c / total
-    p_slag = slag / total
-    p_sf   = sf   / total
-
-    note_parts = []
-    k_sf_used = 0.0
-    if p_sf > 1e-6:
-        k_sf_used = K_SILICA_FUME_PROVISIONAL
-        if p_sf > 0.15:
-            note_parts.append(f"SF={p_sf*100:.1f}% OUT-OF-ENVELOPE")
-        else:
-            note_parts.append(f"SF={p_sf*100:.1f}% k_SF=0.7 PROVISIONAL")
-
-    k_scm_sum = (
-        K_PORTLAND   * p_cem
-        + K_FLY_ASH_F * p_fa_f
-        + K_FLY_ASH_C * p_fa_c
-        + K_SLAG      * p_slag
-        + k_sf_used   * p_sf
-    )
-    factor = f_type * k_scm_sum
-    return factor, "; ".join(note_parts)
+#
+# The calibration coefficients (F_TYPE, K_FLY_ASH_F, K_FLY_ASH_C, K_SLAG,
+# K_SILICA_FUME_PROVISIONAL) and compute_hu_factor() now live in
+# kinetics_correction.py (imported above). The loader applies the
+# correction automatically when use_cw_calibrated_hu=True; this driver
+# threads --raw-hu through to control the flag.
+#
+# compute_hu_factor() is also re-exported here for the diagnostic mode
+# below, where we want to print the factor for the raw-Hu run too.
 
 
 # ======================================================================
@@ -175,15 +117,20 @@ def run_one_mix(input_dat: Path, T0_F: float, duration_hrs: float,
     (t_hrs, T_F, summary_dict).
     """
     scenario = load_cw_scenario(str(input_dat),
-                                weather_dat=None, cw_output_txt=None)
+                                weather_dat=None, cw_output_txt=None,
+                                use_cw_calibrated_hu=use_calibrated_hu)
     mix = scenario.mix
 
-    Hu_raw = mix.Hu_J_kg
+    # Cache values to report in the summary. The factor and envelope note
+    # are populated by the loader when use_calibrated_hu=True; in raw-hu
+    # mode we still call compute_hu_factor() to surface what the factor
+    # WOULD have been (purely diagnostic — does not affect the run).
     if use_calibrated_hu:
-        factor, env_note = compute_hu_factor(mix)
+        factor    = mix.Hu_factor_calibrated
+        env_note  = mix.Hu_calibration_note
     else:
-        factor, env_note = 1.0, "raw-Hu mode"
-    mix.Hu_J_kg = Hu_raw * factor
+        factor, env_note = compute_hu_factor(mix)
+        env_note = (env_note + "; raw-Hu mode").lstrip("; ")
 
     # Tiny grid — adiabatic field stays uniform
     grid = build_grid_rectangular(Lx_m=1.0, Ly_m=1.0, nx=3, ny=3)
@@ -207,9 +154,9 @@ def run_one_mix(input_dat: Path, T0_F: float, duration_hrs: float,
         "slag_lb_yd3":   mix.ggbfs_lb_yd3,
         "sf_lb_yd3":     mix.silica_fume_lb_yd3,
         "total_cm_lb_yd3": mix.total_cementitious_lb_yd3,
-        "Hu_raw_J_kg":   Hu_raw,
+        "Hu_raw_J_kg":   mix.Hu_J_kg,
         "Hu_factor":     factor,
-        "Hu_eff_J_kg":   mix.Hu_J_kg,
+        "Hu_eff_J_kg":   mix.Hu_J_kg_effective,
         "tau_hrs":       mix.tau_hrs,
         "beta":          mix.beta,
         "alpha_u":       mix.alpha_u,

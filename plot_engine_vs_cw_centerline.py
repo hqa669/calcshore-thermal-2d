@@ -63,20 +63,21 @@ def c_to_f(t_c):
 def run_engine_adiabatic(input_dat_path: str | Path,
                          T0_F: float,
                          duration_hrs: float,
-                         output_interval_s: float = 300.0):
+                         output_interval_s: float = 300.0,
+                         use_cw_calibrated_hu: bool = True):
     """
     Run solve_hydration_2d in adiabatic mode at uniform T0.
+
+    The apr28 composition-based Hu calibration is applied by default
+    via load_cw_scenario; pass use_cw_calibrated_hu=False to reproduce
+    the pre-correction (raw-Hu) baseline for diagnostics.
+
     Returns (t_hrs, T_F, mix_kinetics_summary).
     """
     scenario = load_cw_scenario(str(input_dat_path),
-                                weather_dat=None, cw_output_txt=None)
+                                weather_dat=None, cw_output_txt=None,
+                                use_cw_calibrated_hu=use_cw_calibrated_hu)
     mix = scenario.mix
-
-    mix.activation_energy_J_mol = 26457.95       # default 26457.95
-    mix.tau_hrs                 = 29.4010         # default 29.4010
-    mix.beta                    = 0.895         # default 0.8950
-    mix.alpha_u                 = 0.7585      # default 0.75852
-    mix.Hu_J_kg                 = 424143.0*0.95   # default 424143.1
 
     # In adiabatic mode the field stays uniform, so geometry is irrelevant.
     # 3 x 3 is the minimum allowed by build_grid_rectangular.
@@ -97,13 +98,16 @@ def run_engine_adiabatic(input_dat_path: str | Path,
     T_F = c_to_f(res.T_field_C[:, grid.ny // 2, grid.nx // 2])
 
     summary = {
-        "Ea_J_mol":  mix.activation_energy_J_mol,
-        "tau_hrs":   mix.tau_hrs,
-        "beta":      mix.beta,
-        "alpha_u":   mix.alpha_u,
-        "Hu_J_kg":   mix.Hu_J_kg,
-        "n_inner_steps": res.n_inner_steps,
-        "dt_inner_s":    res.dt_inner_s,
+        "Ea_J_mol":             mix.activation_energy_J_mol,
+        "tau_hrs":              mix.tau_hrs,
+        "beta":                 mix.beta,
+        "alpha_u":              mix.alpha_u,
+        "Hu_J_kg":              mix.Hu_J_kg,
+        "Hu_factor_calibrated": mix.Hu_factor_calibrated,
+        "Hu_J_kg_effective":    mix.Hu_J_kg_effective,
+        "Hu_calibration_note":  mix.Hu_calibration_note,
+        "n_inner_steps":        res.n_inner_steps,
+        "dt_inner_s":           res.dt_inner_s,
     }
     return t_hrs, T_F, summary
 
@@ -157,7 +161,8 @@ def make_plot(t_eng_h, T_eng_F, t_cw_h, T_cw_F, summary, out_png):
         "Engine v3 vs CW centerline -- MIX-01, T0 = 73 deg F, adiabatic\n"
         f"Defaults: Ea={summary['Ea_J_mol']:.0f}  tau={summary['tau_hrs']:.2f}  "
         f"beta={summary['beta']:.3f}  alpha_u={summary['alpha_u']:.4f}  "
-        f"Hu={summary['Hu_J_kg']:.0f} J/kg"
+        f"Hu_factor={summary['Hu_factor_calibrated']:.4f}  "
+        f"(Hu_eff={summary['Hu_J_kg_effective']:.0f} J/kg)"
     )
 
     ax2.plot(t_cw_h, delta, "C3-", linewidth=1.0)
@@ -215,21 +220,34 @@ def main(argv=None):
                    help="Output PNG path.")
     p.add_argument("--out-csv", default="engine_vs_cw_centerline_73F.csv",
                    help="Output CSV path.")
+    p.add_argument("--raw-hu", action="store_true",
+                   help="Diagnostic: disable apr28 Hu calibration "
+                        "(use the verbatim CW-regressed Hu_J_kg). "
+                        "Reproduces the +4.32°F MIX-01 overshoot baseline.")
     args = p.parse_args(argv)
 
+    use_calibrated = not args.raw_hu
+
     # ---- Run engine ----
+    mode = "raw-Hu (DIAGNOSTIC)" if args.raw_hu else "apr28 calibrated"
     print(f"Running engine: T0={args.T0_F} deg F, "
           f"duration={args.duration_hrs} hr, "
-          f"output_interval={args.output_interval_s} s, adiabatic ...")
+          f"output_interval={args.output_interval_s} s, adiabatic, {mode} ...")
     t_eng, T_eng, summary = run_engine_adiabatic(
         args.input_dat, args.T0_F, args.duration_hrs, args.output_interval_s,
+        use_cw_calibrated_hu=use_calibrated,
     )
-    print("Kinetics parameters consumed (from input.dat, no overrides):")
-    print(f"  Ea       = {summary['Ea_J_mol']:>10.2f}   J/mol")
-    print(f"  tau      = {summary['tau_hrs']:>10.4f}   hr")
-    print(f"  beta     = {summary['beta']:>10.4f}")
-    print(f"  alpha_u  = {summary['alpha_u']:>10.5f}")
-    print(f"  Hu       = {summary['Hu_J_kg']:>10.1f}   J/kg")
+    print("Kinetics parameters consumed (from input.dat):")
+    print(f"  Ea          = {summary['Ea_J_mol']:>10.2f}   J/mol")
+    print(f"  tau         = {summary['tau_hrs']:>10.4f}   hr")
+    print(f"  beta        = {summary['beta']:>10.4f}")
+    print(f"  alpha_u     = {summary['alpha_u']:>10.5f}")
+    print(f"  Hu (raw)    = {summary['Hu_J_kg']:>10.1f}   J/kg")
+    print(f"  Hu_factor   = {summary['Hu_factor_calibrated']:>10.4f}")
+    print(f"  Hu (eff)    = {summary['Hu_J_kg_effective']:>10.1f}   J/kg "
+          f"(consumed by solver)")
+    if summary["Hu_calibration_note"]:
+        print(f"  envelope    = {summary['Hu_calibration_note']}")
     print(f"  inner steps = {summary['n_inner_steps']}, "
           f"dt_inner = {summary['dt_inner_s']:.1f} s")
 
