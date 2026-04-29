@@ -1,0 +1,15 @@
+Wrote validation/post_apr28_full_stack/diagnostics/check3_mix01_trajectories.csv
+
+MIX-01 full-stack centerline residual signature
+------------------------------------------------
+Window: 2016 samples on CW grid, t ∈ [0.08, 168.00] hr
+First |residual| > 1°F: hr 38.1666666666667
+|residual| max: -3.86°F at hr 167.7
+Residual at t=168 hr: -3.85°F
+RMS over full trajectory:       2.79°F
+RMS over [0, 48] hr (early):    0.69°F
+RMS over [48, 168] hr (late):   3.27°F
+DC offset (late-time mean):     -3.13°F
+AC component (std after 24-hr running-mean detrend): 0.29°F
+
+Wrote validation/post_apr28_full_stack/diagnostics/check3_mix01_full_stack_trajectory.png
