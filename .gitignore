@@ -35,3 +35,7 @@ raw_hu_baseline.png
 raw_hu_baseline.csv
 engine_vs_cw_centerline_*.png
 engine_vs_cw_centerline_*.csv
+
+# Soil calibration study — CW outputs (large, regeneratable) and engine run artifacts
+validation/soil_calibration/cw_runs/**/output.txt
+validation/soil_calibration/engine_runs/
