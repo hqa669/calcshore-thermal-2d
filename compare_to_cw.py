@@ -14,6 +14,8 @@ Library use: from compare_to_cw import run_one, print_gate_table
 
 import sys
 import os
+import math
+import logging
 import time
 import argparse
 import numpy as np
@@ -65,7 +67,7 @@ def pass_fail(ok):
     return "PASS" if ok else "FAIL"
 
 
-def run_one(scenario_dir: str, *, png_path: str | None = None) -> dict:
+def run_one(scenario_dir: str, *, png_path: str | None = None, soil_temp_F: float | None = None) -> dict:
     """Run engine vs CW comparison for a single mix scenario.
 
     Loads CW input.dat + weather.dat + output.txt from scenario_dir, runs the
@@ -167,12 +169,34 @@ def run_one(scenario_dir: str, *, png_path: str | None = None) -> dict:
     # ------------------------------------------------------------------ #
     # 2. Build grid + initial conditions
     # ------------------------------------------------------------------ #
-    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
+    grid = build_grid_half_mat(
+        scn.geometry.width_ft, scn.geometry.depth_ft,
+        is_submerged=getattr(scn.construction, "is_submerged", False),
+    )
     T0_C = (scn.construction.placement_temp_F - 32.0) * 5.0 / 9.0
     T_initial = np.full((grid.ny, grid.nx), T0_C)
 
+    # Soil initialized at its own temperature, not at placement temperature.
+    # Without this, a 3m soil column would take ~3150 hr to equilibrate — 20×
+    # the 168 hr run window — masking model-form differences with an IC transient.
+    _soil_F = soil_temp_F if soil_temp_F is not None else scn.construction.soil_temp_F
+    if _soil_F is not None and not math.isnan(_soil_F):
+        T_initial[grid.is_soil] = (_soil_F - 32.0) * 5.0 / 9.0
+
     # ------------------------------------------------------------------ #
-    # 3. Run solver
+    # 3. Resolve deep-ground Dirichlet BC
+    # ------------------------------------------------------------------ #
+    if _soil_F is not None and not math.isnan(_soil_F):
+        _T_ground_deep_C = (_soil_F - 32.0) * 5.0 / 9.0
+    else:
+        logging.warning(
+            "soil_temp_F missing or unparseable in input.dat; "
+            "falling back to CW Eq 44 ground temperature estimate"
+        )
+        _T_ground_deep_C = None  # solver falls back to compute_T_gw_C(env)
+
+    # ------------------------------------------------------------------ #
+    # 4. Run solver
     # ------------------------------------------------------------------ #
     t_wall_start = time.perf_counter()
     result = solve_hydration_2d(
@@ -182,12 +206,13 @@ def run_one(scenario_dir: str, *, png_path: str | None = None) -> dict:
         boundary_mode="full_2d",
         environment=scn.environment,
         construction=scn.construction,
+        T_ground_deep_C=_T_ground_deep_C,
         diagnostic_outputs=True,
     )
     t_wall_s = time.perf_counter() - t_wall_start
 
     # ------------------------------------------------------------------ #
-    # 4. Engine extractions (°F)
+    # 5. Engine extractions (°F)
     # ------------------------------------------------------------------ #
     jslice, islice = grid.concrete_slice()
     T_conc_C = result.T_field_C[:, jslice, islice]
@@ -221,7 +246,7 @@ def run_one(scenario_dir: str, *, png_path: str | None = None) -> dict:
     eng_amb_F = eng_amb_C * 9.0 / 5.0 + 32.0 if eng_amb_C is not None else None
 
     # ------------------------------------------------------------------ #
-    # 5. CW extractions
+    # 6. CW extractions
     # ------------------------------------------------------------------ #
     val = scn.cw_validation
     cw_peak_max_idx = int(np.argmax(val.T_max_xs_F))
@@ -298,7 +323,7 @@ def run_one(scenario_dir: str, *, png_path: str | None = None) -> dict:
         field_rms_F = float(np.sqrt(np.mean(np.array(sq_errs) ** 2)))
 
     # ------------------------------------------------------------------ #
-    # 6. Metrics and tolerances
+    # 7. Metrics and tolerances
     # ------------------------------------------------------------------ #
     peak_max_delta = engine_peak_max_F - cw_peak_max_F
     peak_grad_delta = engine_peak_grad_F - cw_peak_grad_F
@@ -323,7 +348,7 @@ def run_one(scenario_dir: str, *, png_path: str | None = None) -> dict:
     s1_corner    = (corner_rms_F < S1_TOL_CORNER_RMS_F) if corner_rms_F is not None else False
 
     # ------------------------------------------------------------------ #
-    # 7. Scenario metadata (SCM% for run_all.py markdown; computed from
+    # 8. Scenario metadata (SCM% for run_all.py markdown; computed from
     #    already-loaded scn so no extra I/O)
     # ------------------------------------------------------------------ #
     m = scn.mix
@@ -339,7 +364,7 @@ def run_one(scenario_dir: str, *, png_path: str | None = None) -> dict:
     )
 
     # ------------------------------------------------------------------ #
-    # 8. Optional plot
+    # 9. Optional plot
     # ------------------------------------------------------------------ #
     if png_path is not None:
         try:
