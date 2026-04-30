@@ -273,6 +273,11 @@ class CWConstruction:
     soil_lag_hrs: float = 0.0     # PR 17: 5.0 → 0.0 (no-op)
     soil_damping: float = 1.0     # PR 17: 0.7 → 1.0 (no-op); deprecated, retained for cold-climate data
 
+    # Python-only config field — not read from input.dat (CW has no such concept yet).
+    # False = slab-on-grade (concrete sides are air). True = embedded element (sides
+    # contact soil). Drives material_id allocation in build_grid_half_mat.
+    is_submerged: bool = False
+
 
 @dataclass
 class CWEnvironment:

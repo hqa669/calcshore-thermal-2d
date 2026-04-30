@@ -904,6 +904,7 @@ def build_grid_half_mat(
     n_soil_y: int = 15,
     n_soil_x_ext: int = 12,
     soil_ext_lateral_m: float | None = None,
+    is_submerged: bool = False,
 ) -> Grid2D:
     """Build a half-mat 2D grid for the thermal solver.
 
@@ -996,10 +997,20 @@ def build_grid_half_mat(
     # Concrete: rows iy_concrete_start..iy_concrete_end, cols ix_concrete_start..nx-1
     material_id[iy_concrete_start : iy_concrete_end + 1, ix_concrete_start:] = 1
 
-    # Air/inactive: soil-extension strip (x < 0) for rows above the concrete-soil
-    # interface. These cells are NOT solved by the stencil; they exist only so that
-    # indices align. CW models air on the sides of the concrete slab, not soil.
-    material_id[: iy_concrete_end + 1, :ix_concrete_start] = 3
+    # The engine uses half-mat geometry: ix=0 is the concrete outer face (left side);
+    # ix=nx-1 is the symmetry centerline (right side, ∂T/∂x = 0). Only the left face
+    # has soil contact when the element is embedded; the right face is always symmetry.
+    #
+    # is_submerged=False (slab-on-grade): the region to the left of the concrete face,
+    # from the surface to the bottom of the concrete, is inactive air (material_id=3).
+    # CW models air on the concrete sides for slab-on-grade placements.
+    #
+    # is_submerged=True (embedded element): concrete-height rows keep the default
+    # material_id=2 (soil); only the blanket row stays air (blanket is above grade).
+    if is_submerged:
+        material_id[:n_blanket, :ix_concrete_start] = 3
+    else:
+        material_id[: iy_concrete_end + 1, :ix_concrete_start] = 3
 
     # --- Boolean masks ---
     is_blanket = material_id == 0
@@ -2071,9 +2082,20 @@ def solve_hydration_2d(
 
             _kxp_side  = k_x_face[_js_side, _ics]
             _lat_extra = _kxp_side * (T[_js_side, _ics + 1] - T[_js_side, _ics]) * inv_dxsq
-            T_new[_js_side, _ics] += (
-                dt_step * (_lat_extra - 2.0 * _q_side_total / dx) / rho_cp[_js_side, _ics]
-            )
+            if grid.is_soil[grid.iy_concrete_start, _ics - 1]:
+                # is_submerged=True: left neighbor is soil. Interior stencil already
+                # computed conduction to the soil cell with full-dx mass. Add a second
+                # copy of the same term to correct for the half-cell (dx/2) volume.
+                # No form-face BC applied — the concrete face contacts soil, not air.
+                _kxm_side   = k_x_face[_js_side, _ics - 1]
+                _left_extra = _kxm_side * (T[_js_side, _ics - 1] - T[_js_side, _ics]) * inv_dxsq
+                T_new[_js_side, _ics] += (
+                    dt_step * (_lat_extra + _left_extra) / rho_cp[_js_side, _ics]
+                )
+            else:
+                T_new[_js_side, _ics] += (
+                    dt_step * (_lat_extra - 2.0 * _q_side_total / dx) / rho_cp[_js_side, _ics]
+                )
 
             # (c) Centerline (i = nx-1): zero-flux symmetry
             #     The stencil does NOT update i=nx-1 (edge column). We compute it
@@ -2129,10 +2151,13 @@ def solve_hydration_2d(
                     t_hrs, float(_T_c), _T_amb_C, _RH_frac, _wind_eff
                 )
 
-            # Corner side face: reuse T_outer_form_C[0] from the main side-BC Newton solve
-            # (row 0 of _js_side = j=iy_concrete_start = corner cell). Mirrors how the top
-            # corner reuses _T_outer_C[_ic] at line 1806. PR 7 activates solar term.
-            if _T_sky_arr is not None and len(_T_sky_arr) > 0 and _env_hours is not None:
+            # Corner side face: soil conduction when is_submerged, form-face BC otherwise.
+            if grid.is_soil[_jc, _ic - 1]:
+                # is_submerged=True: corner left face contacts soil.
+                _q_s = k_x_face[_jc, _ic - 1] * (_T_c - T[_jc, _ic - 1]) / dx
+            elif _T_sky_arr is not None and len(_T_sky_arr) > 0 and _env_hours is not None:
+                # is_submerged=False, sky data available: reuse T_outer_form_C[0] from
+                # the main side-BC Newton solve (row 0 of _js_side = iy_concrete_start).
                 _T_outer_form_corner_C = float(_T_outer_form_C[0])
                 _q_s = -(_T_outer_form_corner_C - _T_c) / _r_form_contact
             else:
@@ -2148,13 +2173,12 @@ def solve_hydration_2d(
                 + Q[_jc, _ic] * _cell_A
             ) / (rho_cp[_jc, _ic] * _cell_A)
 
-            # (d) Far-left soil (i = 0, all soil rows): Dirichlet T_gw.
-            #     Design doc D5: "assume T = T_gw at x=0 in soil (soil extends to
-            #     deep ground temperature far from concrete)." Dirichlet rather than
-            #     adiabatic prevents the cold soil-extension from acting as a lateral
-            #     heat sink for the form-edge concrete bottom — matching CW's domain
-            #     which has no soil to the left of the form face.
-            T_new[grid.iy_concrete_end + 1 :, 0] = _T_gw_C
+            # (d) Far-left column (i = 0, all soil rows): Dirichlet T_gw.
+            #     Design doc D5: "assume T = T_gw at x=0 in soil." Using is_soil[:,0]
+            #     rather than a hard slice automatically covers both the slab-on-grade
+            #     case (soil only below the concrete bottom) and the is_submerged case
+            #     (soil extends alongside the concrete face too).
+            T_new[grid.is_soil[:, 0], 0] = _T_gw_C
 
             # (e) Bottom row: Dirichlet T_gw
             T_new[-1, :] = _T_gw_C
