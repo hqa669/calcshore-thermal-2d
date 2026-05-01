@@ -1260,7 +1260,15 @@ def solve_conduction_2d(
     alpha = k_W_m_K / (rho_kg_m3 * Cp_J_kg_K)
     dx = grid.dx
     dy_all = np.diff(grid.y)          # (ny-1,)
-    dy_min = float(dy_all.min())
+    if grid.iy_concrete_start > 0 and dy_all[0] == 0.0:
+        # Zero-thickness blanket row at j=0 (CW-grid alignment, blanket_thickness_m=0):
+        # y[1]==y[0] makes dy_all[0]=0, which would divide by zero in the CFL bound.
+        # Skip blanket dys for the CFL timestep. Production default (blanket_thickness_m=0.02)
+        # has dy_all[0]=0.02 ≠ 0 and is unaffected. Structural analog of the
+        # _use_pure_r_blanket guard in solve_hydration_2d.
+        dy_min = float(dy_all[grid.iy_concrete_start:].min())
+    else:
+        dy_min = float(dy_all.min())
 
     dt_cfl = 0.5 / (alpha * (1.0 / dx**2 + 1.0 / dy_min**2))
     dt = cfl_safety * dt_cfl
@@ -1618,7 +1626,15 @@ def solve_hydration_2d(
     # ------------------------------------------------------------------ #
     dx     = grid.dx
     dy_all = np.diff(grid.y)
-    dy_min = float(dy_all.min())
+    if _use_pure_r_blanket and dy_all[0] == 0.0:
+        # Pure-R blanket with zero thickness (CW-grid alignment): y[1]==y[0] makes
+        # dy_all[0]=0, which would divide by zero in the CFL bound below. The blanket
+        # row j=0 is inactive (k=0, T pinned to initial value) so its dy doesn't bound
+        # the PDE timestep. Skip it. Production default (blanket_thickness_m=0.02)
+        # has dy_all[0]=0.02 ≠ 0 and is unaffected.
+        dy_min = float(dy_all[1:].min())
+    else:
+        dy_min = float(dy_all.min())
     dy_plus  = dy_all[1:].reshape(-1, 1)
     dy_minus = dy_all[:-1].reshape(-1, 1)
     inv_dxsq = 1.0 / dx**2
