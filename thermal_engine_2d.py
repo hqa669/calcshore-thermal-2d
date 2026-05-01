@@ -898,11 +898,20 @@ class Grid2D:
         )
 
 
+# Native (1×) baseline node counts; vertex-centered grids with n-1 intervals.
+# At CW standard geometry (W=40 ft, D=8 ft): dx=1.0 ft, dy_mean=6.67 ft.
+# Stage 5b validation chose grid_refinement=6 (dx≈0.17 ft, dy≈1.10 ft) to
+# close the 0.35°F calibration gate; use grid_refinement=1 to recover native.
+NATIVE_N_CONCRETE_X = 21
+NATIVE_N_CONCRETE_Y = 13
+
+
 def build_grid_half_mat(
     width_ft: float,
     depth_ft: float,
-    n_concrete_x: int = 21,
-    n_concrete_y: int = 13,
+    grid_refinement: int = 6,
+    n_concrete_x: int | None = None,
+    n_concrete_y: int | None = None,
     blanket_thickness_m: float = 0.02,
     n_blanket: int = 1,
     soil_depth_below_m: float = 3.0,
@@ -923,11 +932,19 @@ def build_grid_half_mat(
         Full mat width in feet.  Half-width (centerline) is modelled.
     depth_ft : float
         Concrete depth in feet.
-    n_concrete_x : int
+    grid_refinement : int
+        Multiplier applied to the native baseline node counts when
+        n_concrete_x / n_concrete_y are not passed explicitly.
+        grid_refinement=1 → native (21×13), grid_refinement=6 (default)
+        → 121×73 cells ≈ 0.17 ft × 1.10 ft.  Vertex-centered formula:
+        n = (N_native - 1) * grid_refinement + 1.
+    n_concrete_x : int | None
         Number of nodes across the concrete half-width (vertex-centered,
-        so n_concrete_x - 1 intervals span exactly W/2).
-    n_concrete_y : int
-        Number of nodes through the concrete depth.
+        so n_concrete_x - 1 intervals span exactly W/2).  Overrides
+        grid_refinement when given.
+    n_concrete_y : int | None
+        Number of nodes through the concrete depth.  Overrides
+        grid_refinement when given.
     blanket_thickness_m : float
         Physical blanket thickness in metres.  Blanket gets n_blanket nodes.
     n_blanket : int
@@ -948,6 +965,11 @@ def build_grid_half_mat(
     -------
     Grid2D
     """
+    if n_concrete_x is None:
+        n_concrete_x = (NATIVE_N_CONCRETE_X - 1) * grid_refinement + 1
+    if n_concrete_y is None:
+        n_concrete_y = (NATIVE_N_CONCRETE_Y - 1) * grid_refinement + 1
+
     half_width_m = width_ft * FT_TO_M / 2.0
     depth_m = depth_ft * FT_TO_M
 

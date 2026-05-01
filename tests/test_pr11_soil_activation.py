@@ -37,7 +37,8 @@ def _load_mix01():
 
 def _run_mix01(scn, boundary_mode="full_2d", duration_hrs=168):
     # model_soil=True: Barber soil tests require the transient soil mesh.
-    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft, model_soil=True)
+    # Pin to native 1× grid; sprint-2-complete fixture was generated at native resolution.
+    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft, grid_refinement=1, model_soil=True)
     T0_C = (scn.construction.placement_temp_F - 32.0) * 5.0 / 9.0
     T_initial = np.full((grid.ny, grid.nx), T0_C)
     return solve_hydration_2d(

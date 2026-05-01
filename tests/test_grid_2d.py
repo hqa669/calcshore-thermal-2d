@@ -10,7 +10,8 @@ from thermal_engine_2d import Grid2D, build_grid_half_mat, build_grid_rectangula
 
 @pytest.fixture(scope="module")
 def grid() -> Grid2D:
-    return build_grid_half_mat(40.0, 8.0)
+    # Pin to native 1× grid so tests below document native geometry (dx=1 ft, dy=6.67 ft).
+    return build_grid_half_mat(40.0, 8.0, grid_refinement=1)
 
 
 # ---------------------------------------------------------------------------
@@ -79,8 +80,8 @@ def test_material_id_counts(grid):
     assert not np.any(grid.is_soil & grid.is_air)
     assert np.all(grid.is_blanket | grid.is_concrete | grid.is_soil | grid.is_air)
 
-    # model_soil=True preserves original soil cell counts.
-    g2 = build_grid_half_mat(40.0, 8.0, model_soil=True)
+    # model_soil=True preserves original soil cell counts (pinned to native 1×).
+    g2 = build_grid_half_mat(40.0, 8.0, grid_refinement=1, model_soil=True)
     assert int(g2.is_soil.sum()) == 495
     assert int(g2.is_air.sum()) == 168
     assert g2.is_blanket.sum() + g2.is_concrete.sum() + g2.is_soil.sum() + g2.is_air.sum() == 957
@@ -175,7 +176,7 @@ def test_cw_temp_txt_widths_recoverable(grid):
 
 def test_soil_ext_lateral_override_emits_warning_on_mismatch():
     with pytest.warns(UserWarning):
-        g = build_grid_half_mat(40.0, 8.0, soil_ext_lateral_m=5.0, n_soil_x_ext=12)
+        g = build_grid_half_mat(40.0, 8.0, grid_refinement=1, soil_ext_lateral_m=5.0, n_soil_x_ext=12)
     assert g.x[0] == pytest.approx(-3.6576, abs=1e-6)
 
 
@@ -184,12 +185,12 @@ def test_soil_ext_lateral_override_emits_warning_on_mismatch():
 # ---------------------------------------------------------------------------
 
 def test_soil_ext_lateral_override_accepts_matching_value():
-    matching = 12 * (40.0 * 0.3048 / 2.0) / (21 - 1)  # = 12 * dx = 3.6576
+    matching = 12 * (40.0 * 0.3048 / 2.0) / (21 - 1)  # = 12 * native_dx = 3.6576 m
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
-        g = build_grid_half_mat(40.0, 8.0, soil_ext_lateral_m=matching, n_soil_x_ext=12)
+        g = build_grid_half_mat(40.0, 8.0, grid_refinement=1, soil_ext_lateral_m=matching, n_soil_x_ext=12)
     assert g.nx == 33
-    assert g.ny == 14  # model_soil=False default: no soil rows
+    assert g.ny == 14  # model_soil=False, native (1×): no soil rows
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +198,9 @@ def test_soil_ext_lateral_override_accepts_matching_value():
 # ---------------------------------------------------------------------------
 
 def test_smaller_mat_geometry():
-    g = build_grid_half_mat(20.0, 4.0)
+    g = build_grid_half_mat(20.0, 4.0, grid_refinement=1)
     assert g.nx == 33
-    assert g.ny == 14  # model_soil=False default: no soil rows
+    assert g.ny == 14  # model_soil=False, native (1×): no soil rows
     diffs = np.diff(g.x)
     assert np.allclose(diffs, g.dx, atol=1e-9)
 

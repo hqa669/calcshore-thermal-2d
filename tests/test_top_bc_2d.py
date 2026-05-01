@@ -81,9 +81,9 @@ MIX01 = MixStub()
 
 def test_regression_all_previous():
     """M0/M1/M2 APIs intact after M3 additions."""
-    grid = build_grid_half_mat(40.0, 8.0)
+    grid = build_grid_half_mat(40.0, 8.0, grid_refinement=1)
     assert grid.nx == 33
-    assert grid.ny == 14  # model_soil=False default: no soil rows
+    assert grid.ny == 14  # model_soil=False, native (1×): no soil rows
 
     rect = build_grid_rectangular(2.0, 1.0, 11, 11)
     T0   = np.full((rect.ny, rect.nx), 20.0)

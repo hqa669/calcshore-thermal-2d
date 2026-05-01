@@ -59,7 +59,8 @@ def _run(scn, construction=None, duration_hrs=24, diagnostic_outputs=True):
 
 
 def _run_full2d(scn, construction=None):
-    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft)
+    # Pin to native 1× grid; RMS/peak gates were calibrated at this resolution.
+    grid = build_grid_half_mat(scn.geometry.width_ft, scn.geometry.depth_ft, grid_refinement=1)
     T0_C = (scn.construction.placement_temp_F - 32.0) * 5.0 / 9.0
     T_initial = np.full((grid.ny, grid.nx), T0_C)
     T_initial[grid.is_air] = T0_C
