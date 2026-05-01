@@ -885,6 +885,11 @@ class Grid2D:
     n_soil_x_ext: int
     n_soil_y: int
 
+    # Soil modeling flags (forwarded from build_grid_half_mat; default False for
+    # build_grid_rectangular which has no soil).
+    model_soil: bool = False
+    is_submerged: bool = False
+
     def concrete_slice(self) -> tuple[slice, slice]:
         """Returns (y_slice, x_slice) to extract concrete subdomain from a full field."""
         return (
@@ -905,6 +910,7 @@ def build_grid_half_mat(
     n_soil_x_ext: int = 12,
     soil_ext_lateral_m: float | None = None,
     is_submerged: bool = False,
+    model_soil: bool = False,
 ) -> Grid2D:
     """Build a half-mat 2D grid for the thermal solver.
 
@@ -960,8 +966,12 @@ def build_grid_half_mat(
             stacklevel=2,
         )
 
+    # model_soil=False: suppress the soil buffer — apply Dirichlet T_soil directly
+    # at the concrete face at solve time instead of modelling soil thermal mass.
+    _n_soil_y_actual = n_soil_y if model_soil else 0
+
     nx = n_soil_x_ext + n_concrete_x
-    ny = n_blanket + n_concrete_y + n_soil_y
+    ny = n_blanket + n_concrete_y + _n_soil_y_actual
 
     # --- x coordinates (uniform, monotonically increasing) ---
     x = np.linspace(-L_ext_actual, half_width_m, nx)
@@ -973,12 +983,14 @@ def build_grid_half_mat(
     # Concrete: n_concrete_y nodes from blanket_thickness_m to blanket_thickness_m + depth_m.
     y_concrete = np.linspace(blanket_thickness_m, blanket_thickness_m + depth_m, n_concrete_y)
 
-    # Soil below concrete: n_soil_y nodes, uniform dy_soil, starting one dy_soil below concrete bottom.
-    dy_soil = soil_depth_below_m / n_soil_y
-    y_concrete_bottom = blanket_thickness_m + depth_m
-    y_soil = y_concrete_bottom + dy_soil * np.arange(1, n_soil_y + 1)
-
-    y = np.concatenate([y_blanket, y_concrete, y_soil])
+    if model_soil:
+        # Soil below concrete: n_soil_y nodes, uniform dy_soil.
+        dy_soil = soil_depth_below_m / n_soil_y
+        y_concrete_bottom = blanket_thickness_m + depth_m
+        y_soil = y_concrete_bottom + dy_soil * np.arange(1, n_soil_y + 1)
+        y = np.concatenate([y_blanket, y_concrete, y_soil])
+    else:
+        y = np.concatenate([y_blanket, y_concrete])
 
     # --- Index metadata ---
     ix_concrete_start = n_soil_x_ext
@@ -988,8 +1000,12 @@ def build_grid_half_mat(
     iy_concrete_end = n_blanket + n_concrete_y - 1
     iy_centerline = nx - 1  # last x-index is the symmetry centerline
 
-    # --- Material ID array: default fill = 2 (soil) ---
-    material_id = np.full((ny, nx), 2, dtype=np.int8)
+    # --- Material ID array ---
+    # Default fill: 2 (soil) when model_soil=True, 3 (air) when model_soil=False.
+    # When model_soil=False, no soil cells exist in the grid; Dirichlet T_soil is
+    # applied at the concrete face at solve time.
+    _default_fill = 2 if model_soil else 3
+    material_id = np.full((ny, nx), _default_fill, dtype=np.int8)
 
     # Blanket: rows 0..n_blanket-1, cols ix_concrete_start..nx-1
     material_id[:n_blanket, ix_concrete_start:] = 0
@@ -1001,16 +1017,20 @@ def build_grid_half_mat(
     # ix=nx-1 is the symmetry centerline (right side, ∂T/∂x = 0). Only the left face
     # has soil contact when the element is embedded; the right face is always symmetry.
     #
-    # is_submerged=False (slab-on-grade): the region to the left of the concrete face,
-    # from the surface to the bottom of the concrete, is inactive air (material_id=3).
-    # CW models air on the concrete sides for slab-on-grade placements.
-    #
-    # is_submerged=True (embedded element): concrete-height rows keep the default
-    # material_id=2 (soil); only the blanket row stays air (blanket is above grade).
-    if is_submerged:
-        material_id[:n_blanket, :ix_concrete_start] = 3
+    # model_soil=True: soil cells fill the side and bottom regions per is_submerged.
+    #   is_submerged=False: blanket-height columns left of concrete → air; bottom rows → soil.
+    #   is_submerged=True: only blanket-row columns left of concrete → air; side → soil.
+    # model_soil=False: all cells left of concrete are air regardless of is_submerged.
+    #   Dirichlet T_soil is applied at the concrete left face and/or bottom face at
+    #   solve time based on is_submerged (no soil cells in the grid).
+    if model_soil:
+        if is_submerged:
+            material_id[:n_blanket, :ix_concrete_start] = 3
+        else:
+            material_id[: iy_concrete_end + 1, :ix_concrete_start] = 3
     else:
-        material_id[: iy_concrete_end + 1, :ix_concrete_start] = 3
+        # No soil mesh: mark all non-concrete/blanket columns as air.
+        material_id[:, :ix_concrete_start] = 3
 
     # --- Boolean masks ---
     is_blanket = material_id == 0
@@ -1039,7 +1059,9 @@ def build_grid_half_mat(
         n_concrete_x=n_concrete_x,
         n_concrete_y=n_concrete_y,
         n_soil_x_ext=n_soil_x_ext,
-        n_soil_y=n_soil_y,
+        n_soil_y=_n_soil_y_actual,
+        model_soil=model_soil,
+        is_submerged=is_submerged,
     )
 
 
@@ -2173,15 +2195,23 @@ def solve_hydration_2d(
                 + Q[_jc, _ic] * _cell_A
             ) / (rho_cp[_jc, _ic] * _cell_A)
 
-            # (d) Far-left column (i = 0, all soil rows): Dirichlet T_gw.
-            #     Design doc D5: "assume T = T_gw at x=0 in soil." Using is_soil[:,0]
-            #     rather than a hard slice automatically covers both the slab-on-grade
-            #     case (soil only below the concrete bottom) and the is_submerged case
-            #     (soil extends alongside the concrete face too).
-            T_new[grid.is_soil[:, 0], 0] = _T_gw_C
+            if grid.model_soil:
+                # (d) model_soil=True: soil mesh exists; apply Dirichlet at far-left
+                #     soil column and at the deepest soil row (3 m below concrete).
+                #     Design doc D5: "assume T = T_gw at x=0 in soil."
+                T_new[grid.is_soil[:, 0], 0] = _T_gw_C
 
-            # (e) Bottom row: Dirichlet T_gw
-            T_new[-1, :] = _T_gw_C
+                # (e) Bottom soil row: Dirichlet T_gw (27.40 m, 3 m below concrete face)
+                T_new[-1, :] = _T_gw_C
+            else:
+                # (d/e) model_soil=False: no soil mesh. Apply Dirichlet T_soil directly
+                #       at the concrete face — matches CW's domain (no soil domain at all).
+                # Bottom concrete face: all columns from ix_concrete_start to nx-1.
+                _ics = grid.ix_concrete_start
+                T_new[grid.iy_concrete_end, _ics:] = _T_gw_C
+                # Left concrete face: only when is_submerged (side contacts soil).
+                if grid.is_submerged:
+                    T_new[grid.iy_concrete_start:grid.iy_concrete_end + 1, _ics] = _T_gw_C
 
             # (f) Air cells: hold at initial value (belt-and-suspenders against drift)
             T_new[grid.is_air] = T_initial_C[grid.is_air]

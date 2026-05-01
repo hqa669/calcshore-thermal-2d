@@ -278,6 +278,19 @@ class CWConstruction:
     # contact soil). Drives material_id allocation in build_grid_half_mat.
     is_submerged: bool = False
 
+    # Python-only config field — not read from input.dat.
+    # Controls HOW soil contact is modeled (WHERE is controlled by is_submerged).
+    #
+    # If True, soil is modeled as a transient conducting medium with finite
+    # thermal mass on whichever faces have soil contact (per is_submerged).
+    # A 3 m soil buffer (15 cells, dy=0.20 m) is allocated and solved as a
+    # coupled PDE domain. This preserves the original engine behavior (M0+M4).
+    #
+    # If False (default, matches CW), Dirichlet T_soil is applied directly
+    # at the concrete face on whichever faces have soil contact. The soil is
+    # treated as an infinite heat sink — its thermal mass is ignored.
+    model_soil: bool = False
+
 
 @dataclass
 class CWEnvironment:

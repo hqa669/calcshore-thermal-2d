@@ -172,6 +172,7 @@ def run_one(scenario_dir: str, *, png_path: str | None = None, soil_temp_F: floa
     grid = build_grid_half_mat(
         scn.geometry.width_ft, scn.geometry.depth_ft,
         is_submerged=getattr(scn.construction, "is_submerged", False),
+        model_soil=getattr(scn.construction, "model_soil", False),
     )
     T0_C = (scn.construction.placement_temp_F - 32.0) * 5.0 / 9.0
     T_initial = np.full((grid.ny, grid.nx), T0_C)

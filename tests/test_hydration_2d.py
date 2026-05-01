@@ -222,7 +222,7 @@ def test_regression_m0_m1():
     """M0/M1 API still importable and functional after M2 additions."""
     grid = build_grid_half_mat(40.0, 8.0)
     assert grid.nx == 33
-    assert grid.ny == 29
+    assert grid.ny == 14  # model_soil=False default: no soil rows
 
     rect = build_grid_rectangular(2.0, 1.0, 11, 11)
     T0   = np.full((rect.ny, rect.nx), 20.0)

@@ -18,14 +18,15 @@ def grid() -> Grid2D:
 # ---------------------------------------------------------------------------
 
 def test_default_grid_shape_and_extents(grid):
+    # Default is model_soil=False: ny = n_blanket(1) + n_concrete_y(13) = 14.
     assert grid.nx == 33
-    assert grid.ny == 29
+    assert grid.ny == 14
     assert grid.x.shape == (33,)
-    assert grid.y.shape == (29,)
+    assert grid.y.shape == (14,)
     assert abs(grid.x[0] - (-3.6576)) < 1e-6
     assert abs(grid.x[-1] - 6.0960) < 1e-6
     assert abs(grid.y[0]) < 1e-6
-    assert abs(grid.y[-1] - 5.4584) < 1e-6
+    assert abs(grid.y[-1] - 2.4584) < 1e-4  # concrete bottom (no soil rows)
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +46,12 @@ def test_uniform_dx(grid):
 def test_nonuniform_dy(grid):
     assert grid.y[1] - grid.y[0] == pytest.approx(0.02, abs=1e-9)     # blanket
     assert grid.y[2] - grid.y[1] == pytest.approx(0.2032, abs=1e-4)   # first concrete dy
-    assert np.diff(grid.y)[-1] == pytest.approx(0.2, abs=1e-9)         # last soil dy
+    # Last dy is concrete dy (no soil rows when model_soil=False).
+    assert np.diff(grid.y)[-1] == pytest.approx(0.2032, abs=1e-4)
+
+    # model_soil=True: last dy is the soil dy (0.2 m).
+    g_soil = build_grid_half_mat(40.0, 8.0, model_soil=True)
+    assert np.diff(g_soil.y)[-1] == pytest.approx(0.2, abs=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -53,17 +59,17 @@ def test_nonuniform_dy(grid):
 # ---------------------------------------------------------------------------
 
 def test_material_id_counts(grid):
-    # M4 geometry: soil-extension column above concrete-soil interface is now AIR (id=3)
+    # model_soil=False (default): no soil cells; all left-extension columns are air.
     # blanket = 1 row × 21 cols = 21
     # concrete = 13 rows × 21 cols = 273
-    # soil = 15 rows × 33 cols (below concrete) = 495
-    # air = 14 rows × 12 cols (soil-ext column above concrete-soil interface) = 168
+    # soil = 0 (no soil mesh when model_soil=False)
+    # air = 14 rows × 12 cols = 168  (all cells left of ix_concrete_start)
     assert int(grid.is_blanket.sum()) == 21
     assert int(grid.is_concrete.sum()) == 273
-    assert int(grid.is_soil.sum()) == 495
+    assert int(grid.is_soil.sum()) == 0
     assert int(grid.is_air.sum()) == 168
-    assert grid.is_blanket.sum() + grid.is_concrete.sum() + grid.is_soil.sum() + grid.is_air.sum() == 957
-    assert set(np.unique(grid.material_id)) == {0, 1, 2, 3}
+    assert grid.is_blanket.sum() + grid.is_concrete.sum() + grid.is_soil.sum() + grid.is_air.sum() == 462
+    assert set(np.unique(grid.material_id)) == {0, 1, 3}
     # Masks are mutually exclusive and exhaustive
     assert not np.any(grid.is_blanket & grid.is_concrete)
     assert not np.any(grid.is_blanket & grid.is_soil)
@@ -72,6 +78,13 @@ def test_material_id_counts(grid):
     assert not np.any(grid.is_concrete & grid.is_air)
     assert not np.any(grid.is_soil & grid.is_air)
     assert np.all(grid.is_blanket | grid.is_concrete | grid.is_soil | grid.is_air)
+
+    # model_soil=True preserves original soil cell counts.
+    g2 = build_grid_half_mat(40.0, 8.0, model_soil=True)
+    assert int(g2.is_soil.sum()) == 495
+    assert int(g2.is_air.sum()) == 168
+    assert g2.is_blanket.sum() + g2.is_concrete.sum() + g2.is_soil.sum() + g2.is_air.sum() == 957
+    assert set(np.unique(g2.material_id)) == {0, 1, 2, 3}
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +98,7 @@ def test_material_topology(grid):
     # Blanket row over concrete is blanket
     assert np.all(grid.material_id[0, ix0:] == 0)
 
-    # Blanket row over soil-extension is AIR (M4: not soil — concrete sides are air)
+    # Blanket row over soil-extension is AIR
     assert np.all(grid.material_id[0, :ix0] == 3)
 
     # Concrete block
@@ -93,14 +106,24 @@ def test_material_topology(grid):
         grid.material_id[grid.iy_concrete_start : iy_ce + 1, ix0:] == 1
     )
 
-    # Soil-extension column (x < 0) ABOVE concrete-soil interface is AIR (material_id=3)
-    assert np.all(grid.material_id[: iy_ce + 1, :ix0] == 3)
+    # model_soil=False: all cells left of concrete are air, no soil rows below.
+    assert np.all(grid.material_id[:, :ix0] == 3)
+    assert grid.ny == iy_ce + 1  # last row is the concrete bottom — no soil rows
 
-    # Soil-extension column (x < 0) BELOW concrete-soil interface is soil
-    assert np.all(grid.material_id[iy_ce + 1 :, :ix0] == 2)
+
+def test_material_topology_model_soil_true():
+    g = build_grid_half_mat(40.0, 8.0, model_soil=True)
+    ix0 = g.ix_concrete_start
+    iy_ce = g.iy_concrete_end
+
+    # Soil-extension column ABOVE concrete-soil interface is AIR (M4 behavior)
+    assert np.all(g.material_id[: iy_ce + 1, :ix0] == 3)
+
+    # Soil-extension column BELOW concrete-soil interface is soil
+    assert np.all(g.material_id[iy_ce + 1 :, :ix0] == 2)
 
     # Soil below concrete
-    assert np.all(grid.material_id[iy_ce + 1 :, ix0:] == 2)
+    assert np.all(g.material_id[iy_ce + 1 :, ix0:] == 2)
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +189,7 @@ def test_soil_ext_lateral_override_accepts_matching_value():
         warnings.simplefilter("error", UserWarning)
         g = build_grid_half_mat(40.0, 8.0, soil_ext_lateral_m=matching, n_soil_x_ext=12)
     assert g.nx == 33
-    assert g.ny == 29
+    assert g.ny == 14  # model_soil=False default: no soil rows
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +199,7 @@ def test_soil_ext_lateral_override_accepts_matching_value():
 def test_smaller_mat_geometry():
     g = build_grid_half_mat(20.0, 4.0)
     assert g.nx == 33
-    assert g.ny == 29
+    assert g.ny == 14  # model_soil=False default: no soil rows
     diffs = np.diff(g.x)
     assert np.allclose(diffs, g.dx, atol=1e-9)
 
