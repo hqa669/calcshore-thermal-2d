@@ -1637,6 +1637,15 @@ def solve_hydration_2d(
         dy_min = float(dy_all.min())
     dy_plus  = dy_all[1:].reshape(-1, 1)
     dy_minus = dy_all[:-1].reshape(-1, 1)
+    if _use_pure_r_blanket and dy_minus[0, 0] == 0.0:
+        # Zero-thickness blanket (blanket_thickness_m=0.0): dy_minus[0]=0 makes
+        # `kym * dT / dy_minus` evaluate to 0*dT/0 = NaN in the stencil and
+        # centerline BC. k_y_face at j=0 face is always 0 (harmonic mean of
+        # k_blanket=0 and k_concrete), so the correct flux is 0 regardless of
+        # dy_minus. Replacing dy_minus[0] with 1.0 gives 0*dT/1 = 0. Production
+        # calls (blanket_thickness_m=0.02, dy_minus[0]=0.02) are unaffected.
+        dy_minus = dy_minus.copy()
+        dy_minus[0, 0] = 1.0
     inv_dxsq = 1.0 / dx**2
     y_coef   = 2.0 / (dy_plus + dy_minus)
 
