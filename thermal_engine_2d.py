@@ -127,6 +127,15 @@ FORM_R_SI = 0.0   # m²·K/W
 # this attribute directly. Engine production path reads via resolve_r_form().
 R_FORM_CONTACT_SI: float = 0.0862   # m²·K/W  (= 0.490 hr·ft²·°F/BTU × 0.1761)
 
+# Stage 5e (Sprint 7) single-point calibration: concrete k_uc reduced by 4%
+# relative to the mix-design nominal value.  Derived from minimax optimisation
+# over the 9-run ConcreteWorks soil-concrete BC synthetic dataset at the
+# suppressed-hydration operating point (α_hyd ≈ 0.036, model_soil=False,
+# is_submerged=True).  All 9 runs pass R1 ≤ 0.35°F and R2 ≤ 0.35°F at t=168 hr.
+# Full k(α) curve calibration is deferred to a future sprint.
+# See: docs/calibration/k_uc_calibration_sprint7.md
+K_UC_CALIBRATION_FACTOR_SPRINT7: float = 0.96
+
 
 @dataclass(frozen=True)
 class FormTypeRForm:
@@ -1505,7 +1514,8 @@ def solve_hydration_2d(
     Ea     = mix.activation_energy_J_mol                         # J/mol
     rho_c  = mix.concrete_density_lb_ft3 * LB_FT3_TO_KG_M3      # kg/m³
     Cc     = mix.total_cementitious_lb_yd3 * LB_YD3_TO_KG_M3    # kg_cement/m³_concrete
-    k_uc   = mix.thermal_conductivity_BTU_hr_ft_F * BTU_HR_FT_F_TO_W_M_K  # W/(m·K)
+    k_uc   = (mix.thermal_conductivity_BTU_hr_ft_F * BTU_HR_FT_F_TO_W_M_K
+              * K_UC_CALIBRATION_FACTOR_SPRINT7)                  # W/(m·K), calibrated
     Ca     = mix.aggregate_Cp_BTU_lb_F * BTU_LB_F_TO_J_KG_K     # J/(kg·K)
     Wc     = mix.cement_type_I_II_lb_yd3 * LB_YD3_TO_KG_M3      # kg/m³
     Ww     = mix.water_lb_yd3 * LB_YD3_TO_KG_M3                 # kg/m³
