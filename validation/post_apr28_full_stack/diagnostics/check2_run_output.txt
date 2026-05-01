@@ -1,0 +1,23 @@
+  MIX-01: fs_T0=60°F  adiab_T0=73°F  CW_adiab=149.25°F  CW_fs=129.56°F  eng_adiab_fsT0=134.83°F  eng_fs=125.72°F  engine_drop=+9.11°F  cw_drop_est=+5.27°F  diff=+3.84°F
+  MIX-02: fs_T0=60°F  adiab_T0=73°F  CW_adiab=139.86°F  CW_fs=120.99°F  eng_adiab_fsT0=124.92°F  eng_fs=117.58°F  engine_drop=+7.34°F  cw_drop_est=+3.93°F  diff=+3.41°F
+  MIX-03: fs_T0=60°F  adiab_T0=73°F  CW_adiab=152.02°F  CW_fs=132.82°F  eng_adiab_fsT0=138.81°F  eng_fs=129.43°F  engine_drop=+9.39°F  cw_drop_est=+5.99°F  diff=+3.39°F
+  MIX-04: fs_T0=60°F  adiab_T0=73°F  CW_adiab=152.02°F  CW_fs=134.20°F  eng_adiab_fsT0=139.32°F  eng_fs=131.11°F  engine_drop=+8.21°F  cw_drop_est=+5.12°F  diff=+3.09°F
+  MIX-05: fs_T0=60°F  adiab_T0=73°F  CW_adiab=149.05°F  CW_fs=128.79°F  eng_adiab_fsT0=133.72°F  eng_fs=124.76°F  engine_drop=+8.96°F  cw_drop_est=+4.93°F  diff=+4.03°F
+  MIX-06: fs_T0=60°F  adiab_T0=73°F  CW_adiab=148.01°F  CW_fs=126.82°F  eng_adiab_fsT0=130.98°F  eng_fs=122.34°F  engine_drop=+8.64°F  cw_drop_est=+4.16°F  diff=+4.48°F
+  MIX-07: fs_T0=60°F  adiab_T0=73°F  CW_adiab=147.96°F  CW_fs=125.33°F  eng_adiab_fsT0=129.19°F  eng_fs=120.45°F  engine_drop=+8.73°F  cw_drop_est=+3.86°F  diff=+4.88°F
+  MIX-08: fs_T0=60°F  adiab_T0=73°F  CW_adiab=161.08°F  CW_fs=140.94°F  eng_adiab_fsT0=147.39°F  eng_fs=137.00°F  engine_drop=+10.39°F  cw_drop_est=+6.46°F  diff=+3.94°F
+/Users/hqa668/calcshore-thermal-2d/cw_scenario_loader.py:821: KineticsCorrectionWarning: Silica fume 20.8% exceeds the 15% envelope. CW returns sentinel Hu near zero in this regime. The engine result is provisional and likely wrong.
+  factor, note = compute_hu_factor(mix)
+  MIX-09: fs_T0=60°F  adiab_T0=73°F  CW_adiab=157.84°F  CW_fs=137.23°F  eng_adiab_fsT0=143.08°F  eng_fs=132.74°F  engine_drop=+10.34°F  cw_drop_est=+5.85°F  diff=+4.49°F
+  MIX-10: fs_T0=60°F  adiab_T0=73°F  CW_adiab=142.12°F  CW_fs=123.13°F  eng_adiab_fsT0=127.21°F  eng_fs=119.38°F  engine_drop=+7.83°F  cw_drop_est=+4.08°F  diff=+3.76°F
+  MIX-11: fs_T0=60°F  adiab_T0=73°F  CW_adiab=148.53°F  CW_fs=128.64°F  eng_adiab_fsT0=134.37°F  eng_fs=125.01°F  engine_drop=+9.36°F  cw_drop_est=+5.73°F  diff=+3.63°F
+  MIX-12: fs_T0=60°F  adiab_T0=73°F  CW_adiab=149.29°F  CW_fs=129.63°F  eng_adiab_fsT0=134.82°F  eng_fs=125.77°F  engine_drop=+9.05°F  cw_drop_est=+5.19°F  diff=+3.86°F
+  MIX-14: fs_T0=75°F  adiab_T0=75°F  CW_adiab=151.39°F  CW_fs=143.40°F  eng_adiab_fsT0=151.57°F  eng_fs=141.21°F  engine_drop=+10.36°F  cw_drop_est=+8.16°F  diff=+2.19°F
+  MIX-15: fs_T0=45°F  adiab_T0=45°F  CW_adiab=117.05°F  CW_fs=117.12°F  eng_adiab_fsT0=117.05°F  eng_fs=110.79°F  engine_drop=+6.27°F  cw_drop_est=-0.07°F  diff=+6.34°F
+
+Wrote validation/post_apr28_full_stack/diagnostics/check2_cw_modes.md
+
+Aggregate drop_diff (engine_drop − cw_drop):
+  mean = +3.95°F  (+5.33% of adiab rise)
+  SD   = 0.95°F  (1.42%)
+  min  = +2.19°F   max = +6.34°F

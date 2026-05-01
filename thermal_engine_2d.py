@@ -127,6 +127,15 @@ FORM_R_SI = 0.0   # m²·K/W
 # this attribute directly. Engine production path reads via resolve_r_form().
 R_FORM_CONTACT_SI: float = 0.0862   # m²·K/W  (= 0.490 hr·ft²·°F/BTU × 0.1761)
 
+# Stage 5e (Sprint 7) single-point calibration: concrete k_uc reduced by 4%
+# relative to the mix-design nominal value.  Derived from minimax optimisation
+# over the 9-run ConcreteWorks soil-concrete BC synthetic dataset at the
+# suppressed-hydration operating point (α_hyd ≈ 0.036, model_soil=False,
+# is_submerged=True).  All 9 runs pass R1 ≤ 0.35°F and R2 ≤ 0.35°F at t=168 hr.
+# Full k(α) curve calibration is deferred to a future sprint.
+# See: docs/calibration/k_uc_calibration_sprint7.md
+K_UC_CALIBRATION_FACTOR_SPRINT7: float = 0.96
+
 
 @dataclass(frozen=True)
 class FormTypeRForm:
@@ -885,6 +894,11 @@ class Grid2D:
     n_soil_x_ext: int
     n_soil_y: int
 
+    # Soil modeling flags (forwarded from build_grid_half_mat; default False for
+    # build_grid_rectangular which has no soil).
+    model_soil: bool = False
+    is_submerged: bool = False
+
     def concrete_slice(self) -> tuple[slice, slice]:
         """Returns (y_slice, x_slice) to extract concrete subdomain from a full field."""
         return (
@@ -893,17 +907,28 @@ class Grid2D:
         )
 
 
+# Native (1×) baseline node counts; vertex-centered grids with n-1 intervals.
+# At CW standard geometry (W=40 ft, D=8 ft): dx=1.0 ft, dy_mean=6.67 ft.
+# Stage 5b validation chose grid_refinement=6 (dx≈0.17 ft, dy≈1.10 ft) to
+# close the 0.35°F calibration gate; use grid_refinement=1 to recover native.
+NATIVE_N_CONCRETE_X = 21
+NATIVE_N_CONCRETE_Y = 13
+
+
 def build_grid_half_mat(
     width_ft: float,
     depth_ft: float,
-    n_concrete_x: int = 21,
-    n_concrete_y: int = 13,
+    grid_refinement: int = 6,
+    n_concrete_x: int | None = None,
+    n_concrete_y: int | None = None,
     blanket_thickness_m: float = 0.02,
     n_blanket: int = 1,
     soil_depth_below_m: float = 3.0,
     n_soil_y: int = 15,
     n_soil_x_ext: int = 12,
     soil_ext_lateral_m: float | None = None,
+    is_submerged: bool = False,
+    model_soil: bool = False,
 ) -> Grid2D:
     """Build a half-mat 2D grid for the thermal solver.
 
@@ -916,11 +941,19 @@ def build_grid_half_mat(
         Full mat width in feet.  Half-width (centerline) is modelled.
     depth_ft : float
         Concrete depth in feet.
-    n_concrete_x : int
+    grid_refinement : int
+        Multiplier applied to the native baseline node counts when
+        n_concrete_x / n_concrete_y are not passed explicitly.
+        grid_refinement=1 → native (21×13), grid_refinement=6 (default)
+        → 121×73 cells ≈ 0.17 ft × 1.10 ft.  Vertex-centered formula:
+        n = (N_native - 1) * grid_refinement + 1.
+    n_concrete_x : int | None
         Number of nodes across the concrete half-width (vertex-centered,
-        so n_concrete_x - 1 intervals span exactly W/2).
-    n_concrete_y : int
-        Number of nodes through the concrete depth.
+        so n_concrete_x - 1 intervals span exactly W/2).  Overrides
+        grid_refinement when given.
+    n_concrete_y : int | None
+        Number of nodes through the concrete depth.  Overrides
+        grid_refinement when given.
     blanket_thickness_m : float
         Physical blanket thickness in metres.  Blanket gets n_blanket nodes.
     n_blanket : int
@@ -941,6 +974,11 @@ def build_grid_half_mat(
     -------
     Grid2D
     """
+    if n_concrete_x is None:
+        n_concrete_x = (NATIVE_N_CONCRETE_X - 1) * grid_refinement + 1
+    if n_concrete_y is None:
+        n_concrete_y = (NATIVE_N_CONCRETE_Y - 1) * grid_refinement + 1
+
     half_width_m = width_ft * FT_TO_M / 2.0
     depth_m = depth_ft * FT_TO_M
 
@@ -959,8 +997,12 @@ def build_grid_half_mat(
             stacklevel=2,
         )
 
+    # model_soil=False: suppress the soil buffer — apply Dirichlet T_soil directly
+    # at the concrete face at solve time instead of modelling soil thermal mass.
+    _n_soil_y_actual = n_soil_y if model_soil else 0
+
     nx = n_soil_x_ext + n_concrete_x
-    ny = n_blanket + n_concrete_y + n_soil_y
+    ny = n_blanket + n_concrete_y + _n_soil_y_actual
 
     # --- x coordinates (uniform, monotonically increasing) ---
     x = np.linspace(-L_ext_actual, half_width_m, nx)
@@ -972,12 +1014,14 @@ def build_grid_half_mat(
     # Concrete: n_concrete_y nodes from blanket_thickness_m to blanket_thickness_m + depth_m.
     y_concrete = np.linspace(blanket_thickness_m, blanket_thickness_m + depth_m, n_concrete_y)
 
-    # Soil below concrete: n_soil_y nodes, uniform dy_soil, starting one dy_soil below concrete bottom.
-    dy_soil = soil_depth_below_m / n_soil_y
-    y_concrete_bottom = blanket_thickness_m + depth_m
-    y_soil = y_concrete_bottom + dy_soil * np.arange(1, n_soil_y + 1)
-
-    y = np.concatenate([y_blanket, y_concrete, y_soil])
+    if model_soil:
+        # Soil below concrete: n_soil_y nodes, uniform dy_soil.
+        dy_soil = soil_depth_below_m / n_soil_y
+        y_concrete_bottom = blanket_thickness_m + depth_m
+        y_soil = y_concrete_bottom + dy_soil * np.arange(1, n_soil_y + 1)
+        y = np.concatenate([y_blanket, y_concrete, y_soil])
+    else:
+        y = np.concatenate([y_blanket, y_concrete])
 
     # --- Index metadata ---
     ix_concrete_start = n_soil_x_ext
@@ -987,8 +1031,12 @@ def build_grid_half_mat(
     iy_concrete_end = n_blanket + n_concrete_y - 1
     iy_centerline = nx - 1  # last x-index is the symmetry centerline
 
-    # --- Material ID array: default fill = 2 (soil) ---
-    material_id = np.full((ny, nx), 2, dtype=np.int8)
+    # --- Material ID array ---
+    # Default fill: 2 (soil) when model_soil=True, 3 (air) when model_soil=False.
+    # When model_soil=False, no soil cells exist in the grid; Dirichlet T_soil is
+    # applied at the concrete face at solve time.
+    _default_fill = 2 if model_soil else 3
+    material_id = np.full((ny, nx), _default_fill, dtype=np.int8)
 
     # Blanket: rows 0..n_blanket-1, cols ix_concrete_start..nx-1
     material_id[:n_blanket, ix_concrete_start:] = 0
@@ -996,10 +1044,24 @@ def build_grid_half_mat(
     # Concrete: rows iy_concrete_start..iy_concrete_end, cols ix_concrete_start..nx-1
     material_id[iy_concrete_start : iy_concrete_end + 1, ix_concrete_start:] = 1
 
-    # Air/inactive: soil-extension strip (x < 0) for rows above the concrete-soil
-    # interface. These cells are NOT solved by the stencil; they exist only so that
-    # indices align. CW models air on the sides of the concrete slab, not soil.
-    material_id[: iy_concrete_end + 1, :ix_concrete_start] = 3
+    # The engine uses half-mat geometry: ix=0 is the concrete outer face (left side);
+    # ix=nx-1 is the symmetry centerline (right side, ∂T/∂x = 0). Only the left face
+    # has soil contact when the element is embedded; the right face is always symmetry.
+    #
+    # model_soil=True: soil cells fill the side and bottom regions per is_submerged.
+    #   is_submerged=False: blanket-height columns left of concrete → air; bottom rows → soil.
+    #   is_submerged=True: only blanket-row columns left of concrete → air; side → soil.
+    # model_soil=False: all cells left of concrete are air regardless of is_submerged.
+    #   Dirichlet T_soil is applied at the concrete left face and/or bottom face at
+    #   solve time based on is_submerged (no soil cells in the grid).
+    if model_soil:
+        if is_submerged:
+            material_id[:n_blanket, :ix_concrete_start] = 3
+        else:
+            material_id[: iy_concrete_end + 1, :ix_concrete_start] = 3
+    else:
+        # No soil mesh: mark all non-concrete/blanket columns as air.
+        material_id[:, :ix_concrete_start] = 3
 
     # --- Boolean masks ---
     is_blanket = material_id == 0
@@ -1028,7 +1090,9 @@ def build_grid_half_mat(
         n_concrete_x=n_concrete_x,
         n_concrete_y=n_concrete_y,
         n_soil_x_ext=n_soil_x_ext,
-        n_soil_y=n_soil_y,
+        n_soil_y=_n_soil_y_actual,
+        model_soil=model_soil,
+        is_submerged=is_submerged,
     )
 
 
@@ -1205,7 +1269,15 @@ def solve_conduction_2d(
     alpha = k_W_m_K / (rho_kg_m3 * Cp_J_kg_K)
     dx = grid.dx
     dy_all = np.diff(grid.y)          # (ny-1,)
-    dy_min = float(dy_all.min())
+    if grid.iy_concrete_start > 0 and dy_all[0] == 0.0:
+        # Zero-thickness blanket row at j=0 (CW-grid alignment, blanket_thickness_m=0):
+        # y[1]==y[0] makes dy_all[0]=0, which would divide by zero in the CFL bound.
+        # Skip blanket dys for the CFL timestep. Production default (blanket_thickness_m=0.02)
+        # has dy_all[0]=0.02 ≠ 0 and is unaffected. Structural analog of the
+        # _use_pure_r_blanket guard in solve_hydration_2d.
+        dy_min = float(dy_all[grid.iy_concrete_start:].min())
+    else:
+        dy_min = float(dy_all.min())
 
     dt_cfl = 0.5 / (alpha * (1.0 / dx**2 + 1.0 / dy_min**2))
     dt = cfl_safety * dt_cfl
@@ -1442,7 +1514,8 @@ def solve_hydration_2d(
     Ea     = mix.activation_energy_J_mol                         # J/mol
     rho_c  = mix.concrete_density_lb_ft3 * LB_FT3_TO_KG_M3      # kg/m³
     Cc     = mix.total_cementitious_lb_yd3 * LB_YD3_TO_KG_M3    # kg_cement/m³_concrete
-    k_uc   = mix.thermal_conductivity_BTU_hr_ft_F * BTU_HR_FT_F_TO_W_M_K  # W/(m·K)
+    k_uc   = (mix.thermal_conductivity_BTU_hr_ft_F * BTU_HR_FT_F_TO_W_M_K
+              * K_UC_CALIBRATION_FACTOR_SPRINT7)                  # W/(m·K), calibrated
     Ca     = mix.aggregate_Cp_BTU_lb_F * BTU_LB_F_TO_J_KG_K     # J/(kg·K)
     Wc     = mix.cement_type_I_II_lb_yd3 * LB_YD3_TO_KG_M3      # kg/m³
     Ww     = mix.water_lb_yd3 * LB_YD3_TO_KG_M3                 # kg/m³
@@ -1563,9 +1636,26 @@ def solve_hydration_2d(
     # ------------------------------------------------------------------ #
     dx     = grid.dx
     dy_all = np.diff(grid.y)
-    dy_min = float(dy_all.min())
+    if _use_pure_r_blanket and dy_all[0] == 0.0:
+        # Pure-R blanket with zero thickness (CW-grid alignment): y[1]==y[0] makes
+        # dy_all[0]=0, which would divide by zero in the CFL bound below. The blanket
+        # row j=0 is inactive (k=0, T pinned to initial value) so its dy doesn't bound
+        # the PDE timestep. Skip it. Production default (blanket_thickness_m=0.02)
+        # has dy_all[0]=0.02 ≠ 0 and is unaffected.
+        dy_min = float(dy_all[1:].min())
+    else:
+        dy_min = float(dy_all.min())
     dy_plus  = dy_all[1:].reshape(-1, 1)
     dy_minus = dy_all[:-1].reshape(-1, 1)
+    if _use_pure_r_blanket and dy_minus[0, 0] == 0.0:
+        # Zero-thickness blanket (blanket_thickness_m=0.0): dy_minus[0]=0 makes
+        # `kym * dT / dy_minus` evaluate to 0*dT/0 = NaN in the stencil and
+        # centerline BC. k_y_face at j=0 face is always 0 (harmonic mean of
+        # k_blanket=0 and k_concrete), so the correct flux is 0 regardless of
+        # dy_minus. Replacing dy_minus[0] with 1.0 gives 0*dT/1 = 0. Production
+        # calls (blanket_thickness_m=0.02, dy_minus[0]=0.02) are unaffected.
+        dy_minus = dy_minus.copy()
+        dy_minus[0, 0] = 1.0
     inv_dxsq = 1.0 / dx**2
     y_coef   = 2.0 / (dy_plus + dy_minus)
 
@@ -2071,9 +2161,20 @@ def solve_hydration_2d(
 
             _kxp_side  = k_x_face[_js_side, _ics]
             _lat_extra = _kxp_side * (T[_js_side, _ics + 1] - T[_js_side, _ics]) * inv_dxsq
-            T_new[_js_side, _ics] += (
-                dt_step * (_lat_extra - 2.0 * _q_side_total / dx) / rho_cp[_js_side, _ics]
-            )
+            if grid.is_soil[grid.iy_concrete_start, _ics - 1]:
+                # is_submerged=True: left neighbor is soil. Interior stencil already
+                # computed conduction to the soil cell with full-dx mass. Add a second
+                # copy of the same term to correct for the half-cell (dx/2) volume.
+                # No form-face BC applied — the concrete face contacts soil, not air.
+                _kxm_side   = k_x_face[_js_side, _ics - 1]
+                _left_extra = _kxm_side * (T[_js_side, _ics - 1] - T[_js_side, _ics]) * inv_dxsq
+                T_new[_js_side, _ics] += (
+                    dt_step * (_lat_extra + _left_extra) / rho_cp[_js_side, _ics]
+                )
+            else:
+                T_new[_js_side, _ics] += (
+                    dt_step * (_lat_extra - 2.0 * _q_side_total / dx) / rho_cp[_js_side, _ics]
+                )
 
             # (c) Centerline (i = nx-1): zero-flux symmetry
             #     The stencil does NOT update i=nx-1 (edge column). We compute it
@@ -2129,10 +2230,13 @@ def solve_hydration_2d(
                     t_hrs, float(_T_c), _T_amb_C, _RH_frac, _wind_eff
                 )
 
-            # Corner side face: reuse T_outer_form_C[0] from the main side-BC Newton solve
-            # (row 0 of _js_side = j=iy_concrete_start = corner cell). Mirrors how the top
-            # corner reuses _T_outer_C[_ic] at line 1806. PR 7 activates solar term.
-            if _T_sky_arr is not None and len(_T_sky_arr) > 0 and _env_hours is not None:
+            # Corner side face: soil conduction when is_submerged, form-face BC otherwise.
+            if grid.is_soil[_jc, _ic - 1]:
+                # is_submerged=True: corner left face contacts soil.
+                _q_s = k_x_face[_jc, _ic - 1] * (_T_c - T[_jc, _ic - 1]) / dx
+            elif _T_sky_arr is not None and len(_T_sky_arr) > 0 and _env_hours is not None:
+                # is_submerged=False, sky data available: reuse T_outer_form_C[0] from
+                # the main side-BC Newton solve (row 0 of _js_side = iy_concrete_start).
                 _T_outer_form_corner_C = float(_T_outer_form_C[0])
                 _q_s = -(_T_outer_form_corner_C - _T_c) / _r_form_contact
             else:
@@ -2148,16 +2252,23 @@ def solve_hydration_2d(
                 + Q[_jc, _ic] * _cell_A
             ) / (rho_cp[_jc, _ic] * _cell_A)
 
-            # (d) Far-left soil (i = 0, all soil rows): Dirichlet T_gw.
-            #     Design doc D5: "assume T = T_gw at x=0 in soil (soil extends to
-            #     deep ground temperature far from concrete)." Dirichlet rather than
-            #     adiabatic prevents the cold soil-extension from acting as a lateral
-            #     heat sink for the form-edge concrete bottom — matching CW's domain
-            #     which has no soil to the left of the form face.
-            T_new[grid.iy_concrete_end + 1 :, 0] = _T_gw_C
+            if grid.model_soil:
+                # (d) model_soil=True: soil mesh exists; apply Dirichlet at far-left
+                #     soil column and at the deepest soil row (3 m below concrete).
+                #     Design doc D5: "assume T = T_gw at x=0 in soil."
+                T_new[grid.is_soil[:, 0], 0] = _T_gw_C
 
-            # (e) Bottom row: Dirichlet T_gw
-            T_new[-1, :] = _T_gw_C
+                # (e) Bottom soil row: Dirichlet T_gw (27.40 m, 3 m below concrete face)
+                T_new[-1, :] = _T_gw_C
+            else:
+                # (d/e) model_soil=False: no soil mesh. Apply Dirichlet T_soil directly
+                #       at the concrete face — matches CW's domain (no soil domain at all).
+                # Bottom concrete face: all columns from ix_concrete_start to nx-1.
+                _ics = grid.ix_concrete_start
+                T_new[grid.iy_concrete_end, _ics:] = _T_gw_C
+                # Left concrete face: only when is_submerged (side contacts soil).
+                if grid.is_submerged:
+                    T_new[grid.iy_concrete_start:grid.iy_concrete_end + 1, _ics] = _T_gw_C
 
             # (f) Air cells: hold at initial value (belt-and-suspenders against drift)
             T_new[grid.is_air] = T_initial_C[grid.is_air]

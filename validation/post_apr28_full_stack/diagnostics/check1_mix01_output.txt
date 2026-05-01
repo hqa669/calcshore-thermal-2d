@@ -1,0 +1,32 @@
+========================================================================
+CHECK 1.2 — MIX-01 calibration-field dump after load_cw_scenario
+========================================================================
+Hu_J_kg              = 424143.13
+Hu_J_kg_effective    = 403531.0094293787
+Hu_factor_calibrated = 0.9514029130434783
+Hu_calibration_note  = ''
+ratio (effective/raw) = 0.951403
+
+========================================================================
+Pre-solve: Hu the solver is about to consume
+========================================================================
+mix.Hu_J_kg_effective (passed via scn.mix to solver) = 403531.0094293787
+thermal_engine_2d.py:1438 will read: Hu = mix.Hu_J_kg_effective
+
+========================================================================
+Running solve_hydration_2d (168hr, full_2d boundary mode)
+========================================================================
+
+========================================================================
+Post-solve: peak temperatures
+========================================================================
+Engine peak max T = 125.72 °F @ 152.0 hr
+CW peak max T     = 129.56 °F @ 145.8 hr
+Δ (engine − CW)   = -3.84 °F
+Solver wall time  = 1.59 s
+
+========================================================================
+Sanity check vs. validation/post_apr28_full_stack/run_all_output.md
+========================================================================
+That file recorded MIX-01 PeakMax Δ = -3.84°F (engine 125.7°F vs CW 129.6°F).
+This run:                         PeakMax Δ = -3.84°F  → MATCHES committed run

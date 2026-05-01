@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Compare R2 time evolution for Runs F and I at k×1.00 vs k×0.96."""
+import os, sys
+import numpy as np
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+SC   = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, ROOT); sys.path.insert(0, SC)
+
+from cw_scenario_loader import parse_cw_dat, parse_cw_temp_output
+from thermal_engine_2d import solve_hydration_2d, build_grid_half_mat
+from kinetics_correction import compute_hu_factor
+from stage3_compare import resample_engine_to_cw
+from stage4b_run import make_neutral_env, nearest_time_idx
+
+CW_RUNS = os.path.join(SC, "cw_runs")
+R2_WI  = 0
+R2_DI  = slice(24, 49)
+
+
+def run_engine(folder, pl_F, so_F, k_factor, output_hrs):
+    mix, geom, constr, _ = parse_cw_dat(os.path.join(CW_RUNS, folder, "input.dat"))
+    fac, _ = compute_hu_factor(mix)
+    mix.Hu_factor_calibrated = fac
+    mix.Hu_J_kg_effective = mix.Hu_J_kg * fac
+    mix.thermal_conductivity_BTU_hr_ft_F *= k_factor
+    constr.model_soil = False; constr.is_submerged = True
+    grid = build_grid_half_mat(geom.width_ft, geom.depth_ft,
+                               is_submerged=True, model_soil=False,
+                               blanket_thickness_m=0.0)
+    T0 = (pl_F - 32) * 5/9
+    Ts = (so_F - 32) * 5/9
+    Ti = np.full((grid.ny, grid.nx), T0); Ti[grid.is_soil] = Ts
+    duration_s = max(output_hrs) * 3600
+    res = solve_hydration_2d(grid, mix, Ti, duration_s=duration_s,
+                             output_interval_s=1800., boundary_mode="full_2d",
+                             environment=make_neutral_env(pl_F), construction=constr,
+                             T_ground_deep_C=Ts, diagnostic_outputs=False)
+    jsl, isl = grid.concrete_slice()
+    results = {}
+    for hr in output_hrs:
+        ti = nearest_time_idx(res.t_s, float(hr))
+        TF = res.T_field_C[ti, jsl, isl] * 9/5 + 32
+        results[hr] = (grid.y[jsl], grid.x[isl], TF)
+    return results
+
+
+def load_cw(folder, hr):
+    v = parse_cw_temp_output(os.path.join(CW_RUNS, folder, "output.txt"))
+    ti = int(np.abs(v.time_hrs - hr).argmin())
+    return v.T_field_F[ti], v.widths_m, v.depths_m
+
+
+RUNS_FI = [
+    ("F", "runF_73_45",  73, 45),
+    ("I", "runI_100_73", 100, 73),
+]
+TIMESTAMPS = [24, 84, 168]
+
+print("R2 max|R| time evolution: k×1.00 vs k×0.96  (Run F and I)")
+print("=" * 72)
+print(f"  {'Run':>4}  {'t(hr)':>7}  {'k×1.00 R2':>11}  {'k×0.96 R2':>11}  {'Δ (096-100)':>13}  Better?")
+print("  " + "-" * 65)
+
+for label, folder, pl_F, so_F in RUNS_FI:
+    r100 = run_engine(folder, pl_F, so_F, 1.00, TIMESTAMPS)
+    r096 = run_engine(folder, pl_F, so_F, 0.96, TIMESTAMPS)
+    for hr in TIMESTAMPS:
+        cw_F, cw_widths_m, cw_depths_m = load_cw(folder, hr)
+        def r2_max(eng_results):
+            ey, ex, eT = eng_results[hr]
+            eng_on_cw = resample_engine_to_cw(ey, ex, eT, cw_depths_m, cw_widths_m)
+            R = eng_on_cw - cw_F
+            return float(np.max(np.abs(R[R2_DI, R2_WI])))
+        v100 = r2_max(r100)
+        v096 = r2_max(r096)
+        delta = v096 - v100
+        better = "YES ↓" if delta < -0.001 else ("same" if abs(delta) < 0.001 else "NO ↑")
+        print(f"  {label:>4}  {hr:>7}  {v100:>11.4f}  {v096:>11.4f}  {delta:>+13.4f}  {better}")
+
+print()
+print("Interpretation:")
+print("  If k×0.96 improves at all timesteps → not over-fitting, safe to commit")
+print("  If k×0.96 worsens at t=24 → it has traded t=24 for t=168 performance")

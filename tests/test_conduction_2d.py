@@ -218,7 +218,17 @@ def test_analytical_solver_sanity():
 # ---------------------------------------------------------------------------
 
 def test_regression_m0_grid_builder():
-    g = build_grid_half_mat(40.0, 8.0)
+    # Pin to native 1× grid; these counts document native resolution.
+    g = build_grid_half_mat(40.0, 8.0, grid_refinement=1)
     assert g.nx == 33
-    assert g.ny == 29
+    assert g.ny == 14   # n_blanket(1) + n_concrete_y(13); no soil rows
     assert int(g.is_concrete.sum()) == 273
+    assert g.n_soil_y == 0
+    assert int(g.is_soil.sum()) == 0
+
+    # model_soil=True preserves the original 15-row soil buffer.
+    g2 = build_grid_half_mat(40.0, 8.0, grid_refinement=1, model_soil=True)
+    assert g2.nx == 33
+    assert g2.ny == 29   # n_blanket(1) + n_concrete_y(13) + n_soil_y(15)
+    assert int(g2.is_concrete.sum()) == 273
+    assert g2.n_soil_y == 15
