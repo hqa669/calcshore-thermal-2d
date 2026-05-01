@@ -1,0 +1,17 @@
+{
+  "grid_refinement": 6,
+  "blanket_thickness_m": 0.0,
+  "nx_full": 133,
+  "ny_full": 74,
+  "n_concrete_x": 121,
+  "n_concrete_y": 73,
+  "nx_concrete": 121,
+  "ny_concrete": 73,
+  "dx_m": 0.0508,
+  "dx_ft": 0.16666666666666666,
+  "y0": 0.0,
+  "y1": 0.0,
+  "y_concrete_end": 24.384,
+  "model_soil": false,
+  "is_submerged": true
+}
