@@ -1,0 +1,6 @@
+scenario,T_max_eng_t_hr,T_max_cw_t_hr,t_diff,flagged
+S1,168.00,168.00,0.00,False
+S2,168.00,168.00,0.00,False
+S3,168.00,168.00,0.00,False
+S4,168.00,167.00,1.00,False
+S5,168.00,168.00,0.00,False

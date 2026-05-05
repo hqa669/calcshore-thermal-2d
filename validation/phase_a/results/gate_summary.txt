@@ -1,0 +1,15 @@
+Phase A Gate Summary
+====================
+Gate: |T_max_diff| < 2.0°F AND |dT_max_diff| < 2.0°F  (di ∈ [5,48], all wi, t ∈ [0,168 hr])
+
+Cells failing T_max gate:  0
+Cells failing dT_max gate: 0
+Cells failing either gate: 0
+Cells passing both gates:  25 / 25
+
+Outcome: A — CLEAN PASS — all 25 cells within engineering tolerance.
+
+Failing cells: None
+
+Note: §11 of PHASE_A_SCOPING_BRIEF.md uses legacy "max|R|" decision-rule language; §6 (T_max/ΔT_max gate) is authoritative per Phase 0 discovery.
+Note: §9 of brief says "gate applies to di∈[24,48]"; §6 validity mask di∈[5,48] is authoritative. This session uses di∈[5,48] per §6.

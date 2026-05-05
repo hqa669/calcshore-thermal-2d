@@ -1,0 +1,14 @@
+Phase A Smoke Test — MIX-01 at S3 (T_pl=73, T_soil=85)
+============================================================
+c(T_pl=73) = 1.053115
+Hu_factor = 0.951403
+alpha_u_eff = 0.798788
+Hu_eff = 383178.3 J/kg
+
+  T_core(di=24,wi=0,t=168): expected=149.4, observed=149.4005, diff=0.0005, tol=0.1 → PASS
+  T(di=48,wi=0,t=168): expected=85.2, observed=85.1975, diff=0.0025, tol=0.1 → PASS
+  alpha(di=24,wi=0,t=168): expected=0.7388, observed=0.7388, diff=0.0000, tol=0.001 → PASS
+  max|R| [24,48] t=168: expected=1.05, observed=1.0508, diff=0.0008, tol=0.1 → PASS
+  di_at_max_R: 47
+
+Verdict: PASS — wrapper/engine matches Sprint 9 pilot within tolerance.
