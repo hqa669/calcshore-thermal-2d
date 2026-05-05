@@ -39,3 +39,20 @@ engine_vs_cw_centerline_*.csv
 # Soil calibration study — CW outputs (large, regeneratable) and engine run artifacts
 validation/soil_calibration/cw_runs/**/output.txt
 validation/soil_calibration/engine_runs/
+
+# Phase A and sprint validation campaigns — CW data (large, regeneratable)
+validation/phase_a/cw_data/
+validation/sprint8/**/cw_data/
+validation/sprint9/**/cw_data/
+validation/sprint8/**/output.txt
+validation/sprint9/**/output.txt
+
+# Phase A computed numpy arrays (large, regeneratable from CW data)
+validation/phase_a/data/*.npz
+
+# Phase A figures (regeneratable from results CSVs; commit only if small)
+# Uncomment to gitignore: validation/phase_a/figures/
+
+# Sprint 8 cache files (large, regeneratable from CW data)
+validation/sprint8/**/cw_fields_cache.pkl
+validation/sprint8/**/*.pkl
