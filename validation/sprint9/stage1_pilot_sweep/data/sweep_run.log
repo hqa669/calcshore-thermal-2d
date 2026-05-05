@@ -1,0 +1,177 @@
+Sprint 9 Stage 1-pilot — (Hu_factor, c) sensitivity sweep
+Grid: 8 Hu_factor × 5 c_multiplier × 2 mixes = 80 runs
+C_ANCHOR = 1.0532  (c_eff = c_multiplier × C_ANCHOR)
+CW data: /Users/hqa668/calcshore-thermal-2d/validation/sprint9/stage1_pilot/cw_data/{mix01,mix07}/
+Output:  /Users/hqa668/calcshore-thermal-2d/validation/sprint9/stage1_pilot_sweep/data/
+
+[01/80] MIX01  Hu_factor=0.88  c_mult=0.95  c_eff=1.0005
+         max|R|=5.9896°F @di=41  R47=-3.2527  R48=+0.1873  R36=-5.9851  → FAIL
+[02/80] MIX01  Hu_factor=0.88  c_mult=0.97  c_eff=1.0216
+         max|R|=5.9839°F @di=39  R47=-3.2186  R48=+0.1876  R36=-5.9796  → FAIL
+[03/80] MIX01  Hu_factor=0.88  c_mult=1.00  c_eff=1.0532
+         max|R|=5.9755°F @di=39  R47=-3.1670  R48=+0.1881  R36=-5.9714  → FAIL
+[04/80] MIX01  Hu_factor=0.88  c_mult=1.03  c_eff=1.0848
+         max|R|=5.9671°F @di=39  R47=-3.1151  R48=+0.1885  R36=-5.9632  → FAIL
+[05/80] MIX01  Hu_factor=0.88  c_mult=1.05  c_eff=1.1059
+         max|R|=5.9614°F @di=39  R47=-3.0802  R48=+0.1888  R36=-5.9577  → FAIL
+[06/80] MIX01  Hu_factor=0.89  c_mult=0.95  c_eff=1.0005
+         max|R|=5.1562°F @di=43  R47=-2.9575  R48=+0.1898  R36=-5.1272  → FAIL
+[07/80] MIX01  Hu_factor=0.89  c_mult=0.97  c_eff=1.0216
+         max|R|=5.1369°F @di=43  R47=-2.9229  R48=+0.1901  R36=-5.1217  → FAIL
+[08/80] MIX01  Hu_factor=0.89  c_mult=1.00  c_eff=1.0532
+         max|R|=5.1178°F @di=39  R47=-2.8706  R48=+0.1905  R36=-5.1136  → FAIL
+[09/80] MIX01  Hu_factor=0.89  c_mult=1.03  c_eff=1.0848
+         max|R|=5.1095°F @di=39  R47=-2.8180  R48=+0.1910  R36=-5.1055  → FAIL
+[10/80] MIX01  Hu_factor=0.89  c_mult=1.05  c_eff=1.1059
+         max|R|=5.1039°F @di=39  R47=-2.7827  R48=+0.1913  R36=-5.1000  → FAIL
+[11/80] MIX01  Hu_factor=0.90  c_mult=0.95  c_eff=1.0005
+         max|R|=4.4057°F @di=45  R47=-2.6622  R48=+0.1922  R36=-4.2686  → FAIL
+[12/80] MIX01  Hu_factor=0.90  c_mult=0.97  c_eff=1.0216
+         max|R|=4.3588°F @di=45  R47=-2.6272  R48=+0.1925  R36=-4.2632  → FAIL
+[13/80] MIX01  Hu_factor=0.90  c_mult=1.00  c_eff=1.0532
+         max|R|=4.2882°F @di=45  R47=-2.5742  R48=+0.1929  R36=-4.2552  → FAIL
+[14/80] MIX01  Hu_factor=0.90  c_mult=1.03  c_eff=1.0848
+         max|R|=4.2513°F @di=39  R47=-2.5209  R48=+0.1934  R36=-4.2471  → FAIL
+[15/80] MIX01  Hu_factor=0.90  c_mult=1.05  c_eff=1.1059
+         max|R|=4.2458°F @di=39  R47=-2.4852  R48=+0.1937  R36=-4.2418  → FAIL
+[16/80] MIX01  Hu_factor=0.91  c_mult=0.95  c_eff=1.0005
+         max|R|=3.7086°F @di=45  R47=-2.3670  R48=+0.1946  R36=-3.4094  → FAIL
+[17/80] MIX01  Hu_factor=0.91  c_mult=0.97  c_eff=1.0216
+         max|R|=3.6611°F @di=45  R47=-2.3314  R48=+0.1949  R36=-3.4041  → FAIL
+[18/80] MIX01  Hu_factor=0.91  c_mult=1.00  c_eff=1.0532
+         max|R|=3.5895°F @di=45  R47=-2.2778  R48=+0.1954  R36=-3.3962  → FAIL
+[19/80] MIX01  Hu_factor=0.91  c_mult=1.03  c_eff=1.0848
+         max|R|=3.5177°F @di=45  R47=-2.2238  R48=+0.1959  R36=-3.3882  → FAIL
+[20/80] MIX01  Hu_factor=0.91  c_mult=1.05  c_eff=1.1059
+         max|R|=3.4697°F @di=45  R47=-2.1876  R48=+0.1962  R36=-3.3829  → FAIL
+[21/80] MIX01  Hu_factor=0.92  c_mult=0.95  c_eff=1.0005
+         max|R|=3.0112°F @di=45  R47=-2.0717  R48=+0.1970  R36=-2.5496  → FAIL
+[22/80] MIX01  Hu_factor=0.92  c_mult=0.97  c_eff=1.0216
+         max|R|=2.9629°F @di=45  R47=-2.0357  R48=+0.1973  R36=-2.5444  → FAIL
+[23/80] MIX01  Hu_factor=0.92  c_mult=1.00  c_eff=1.0532
+         max|R|=2.8904°F @di=45  R47=-1.9814  R48=+0.1978  R36=-2.5365  → FAIL
+[24/80] MIX01  Hu_factor=0.92  c_mult=1.03  c_eff=1.0848
+         max|R|=2.8176°F @di=45  R47=-1.9267  R48=+0.1983  R36=-2.5287  → FAIL
+[25/80] MIX01  Hu_factor=0.92  c_mult=1.05  c_eff=1.1059
+         max|R|=2.7690°F @di=45  R47=-1.8901  R48=+0.1986  R36=-2.5235  → FAIL
+[26/80] MIX01  Hu_factor=0.93  c_mult=0.95  c_eff=1.0005
+         max|R|=2.3134°F @di=45  R47=-1.7764  R48=+0.1995  R36=-1.6892  → FAIL
+[27/80] MIX01  Hu_factor=0.93  c_mult=0.97  c_eff=1.0216
+         max|R|=2.2645°F @di=45  R47=-1.7400  R48=+0.1998  R36=-1.6841  → FAIL
+[28/80] MIX01  Hu_factor=0.93  c_mult=1.00  c_eff=1.0532
+         max|R|=2.1909°F @di=45  R47=-1.6850  R48=+0.2003  R36=-1.6764  → FAIL
+[29/80] MIX01  Hu_factor=0.93  c_mult=1.03  c_eff=1.0848
+         max|R|=2.1171°F @di=45  R47=-1.6296  R48=+0.2007  R36=-1.6687  → FAIL
+[30/80] MIX01  Hu_factor=0.93  c_mult=1.05  c_eff=1.1059
+         max|R|=2.0678°F @di=45  R47=-1.5925  R48=+0.2011  R36=-1.6635  → FAIL
+[31/80] MIX01  Hu_factor=0.94  c_mult=0.95  c_eff=1.0005
+         max|R|=1.6152°F @di=45  R47=-1.4812  R48=+0.2019  R36=-0.8283  → FAIL
+[32/80] MIX01  Hu_factor=0.94  c_mult=0.97  c_eff=1.0216
+         max|R|=1.5657°F @di=45  R47=-1.4443  R48=+0.2022  R36=-0.8232  → FAIL
+[33/80] MIX01  Hu_factor=0.94  c_mult=1.00  c_eff=1.0532
+         max|R|=1.4911°F @di=45  R47=-1.3886  R48=+0.2027  R36=-0.8156  → FAIL
+[34/80] MIX01  Hu_factor=0.94  c_mult=1.03  c_eff=1.0848
+         max|R|=1.4164°F @di=45  R47=-1.3326  R48=+0.2032  R36=-0.8080  → FAIL
+[35/80] MIX01  Hu_factor=0.94  c_mult=1.05  c_eff=1.1059
+         max|R|=1.3663°F @di=45  R47=-1.2950  R48=+0.2035  R36=-0.8030  → FAIL
+[36/80] MIX01  Hu_factor=0.95  c_mult=0.95  c_eff=1.0005
+         max|R|=1.1859°F @di=47  R47=-1.1859  R48=+0.2043  R36=+0.0332  → FAIL
+[37/80] MIX01  Hu_factor=0.95  c_mult=0.97  c_eff=1.0216
+         max|R|=1.1486°F @di=47  R47=-1.1486  R48=+0.2046  R36=+0.0382  → FAIL
+[38/80] MIX01  Hu_factor=0.95  c_mult=1.00  c_eff=1.0532
+         max|R|=1.0922°F @di=47  R47=-1.0922  R48=+0.2051  R36=+0.0456  → FAIL
+[39/80] MIX01  Hu_factor=0.95  c_mult=1.03  c_eff=1.0848
+         max|R|=1.0355°F @di=47  R47=-1.0355  R48=+0.2056  R36=+0.0531  → FAIL
+[40/80] MIX01  Hu_factor=0.95  c_mult=1.05  c_eff=1.1059
+         max|R|=0.9974°F @di=47  R47=-0.9974  R48=+0.2060  R36=+0.0580  → FAIL
+[41/80] MIX07  Hu_factor=0.88  c_mult=0.95  c_eff=1.0005
+         max|R|=2.3120°F @di=46  R47=-2.1795  R48=+0.2019  R36=-0.8231  → FAIL
+[42/80] MIX07  Hu_factor=0.88  c_mult=0.97  c_eff=1.0216
+         max|R|=2.2736°F @di=46  R47=-2.1543  R48=+0.2021  R36=-0.8222  → FAIL
+[43/80] MIX07  Hu_factor=0.88  c_mult=1.00  c_eff=1.0532
+         max|R|=2.2158°F @di=46  R47=-2.1162  R48=+0.2024  R36=-0.8209  → FAIL
+[44/80] MIX07  Hu_factor=0.88  c_mult=1.03  c_eff=1.0848
+         max|R|=2.1605°F @di=45  R47=-2.0780  R48=+0.2028  R36=-0.8196  → FAIL
+[45/80] MIX07  Hu_factor=0.88  c_mult=1.05  c_eff=1.1059
+         max|R|=2.1257°F @di=45  R47=-2.0524  R48=+0.2030  R36=-0.8188  → FAIL
+[46/80] MIX07  Hu_factor=0.89  c_mult=0.95  c_eff=1.0005
+         max|R|=1.8164°F @di=47  R47=-1.8164  R48=+0.2049  R36=+0.2585  → FAIL
+[47/80] MIX07  Hu_factor=0.89  c_mult=0.97  c_eff=1.0216
+         max|R|=1.7908°F @di=47  R47=-1.7908  R48=+0.2051  R36=+0.2594  → FAIL
+[48/80] MIX07  Hu_factor=0.89  c_mult=1.00  c_eff=1.0532
+         max|R|=1.7521°F @di=47  R47=-1.7521  R48=+0.2054  R36=+0.2607  → FAIL
+[49/80] MIX07  Hu_factor=0.89  c_mult=1.03  c_eff=1.0848
+         max|R|=1.7133°F @di=47  R47=-1.7133  R48=+0.2058  R36=+0.2619  → FAIL
+[50/80] MIX07  Hu_factor=0.89  c_mult=1.05  c_eff=1.1059
+         max|R|=1.6873°F @di=47  R47=-1.6873  R48=+0.2060  R36=+0.2628  → FAIL
+[51/80] MIX07  Hu_factor=0.90  c_mult=0.95  c_eff=1.0005
+         max|R|=1.4521°F @di=47  R47=-1.4521  R48=+0.2079  R36=+1.3450  → FAIL
+[52/80] MIX07  Hu_factor=0.90  c_mult=0.97  c_eff=1.0216
+         max|R|=1.4261°F @di=47  R47=-1.4261  R48=+0.2081  R36=+1.3458  → FAIL
+[53/80] MIX07  Hu_factor=0.90  c_mult=1.00  c_eff=1.0532
+         max|R|=1.3868°F @di=47  R47=-1.3868  R48=+0.2084  R36=+1.3471  → FAIL
+[54/80] MIX07  Hu_factor=0.90  c_mult=1.03  c_eff=1.0848
+         max|R|=1.3527°F @di=40  R47=-1.3474  R48=+0.2088  R36=+1.3483  → FAIL
+[55/80] MIX07  Hu_factor=0.90  c_mult=1.05  c_eff=1.1059
+         max|R|=1.3541°F @di=40  R47=-1.3210  R48=+0.2090  R36=+1.3492  → FAIL
+[56/80] MIX07  Hu_factor=0.91  c_mult=0.95  c_eff=1.0005
+         max|R|=2.4367°F @di=40  R47=-1.0866  R48=+0.2109  R36=+2.4362  → FAIL
+[57/80] MIX07  Hu_factor=0.91  c_mult=0.97  c_eff=1.0216
+         max|R|=2.4382°F @di=40  R47=-1.0601  R48=+0.2111  R36=+2.4371  → FAIL
+[58/80] MIX07  Hu_factor=0.91  c_mult=1.00  c_eff=1.0532
+         max|R|=2.4404°F @di=40  R47=-1.0203  R48=+0.2115  R36=+2.4383  → FAIL
+[59/80] MIX07  Hu_factor=0.91  c_mult=1.03  c_eff=1.0848
+         max|R|=2.4426°F @di=40  R47=-0.9803  R48=+0.2118  R36=+2.4395  → FAIL
+[60/80] MIX07  Hu_factor=0.91  c_mult=1.05  c_eff=1.1059
+         max|R|=2.4441°F @di=40  R47=-0.9535  R48=+0.2120  R36=+2.4404  → FAIL
+[61/80] MIX07  Hu_factor=0.92  c_mult=0.95  c_eff=1.0005
+         max|R|=3.5323°F @di=36  R47=-0.7198  R48=+0.2139  R36=+3.5323  → FAIL
+[62/80] MIX07  Hu_factor=0.92  c_mult=0.97  c_eff=1.0216
+         max|R|=3.5331°F @di=36  R47=-0.6930  R48=+0.2141  R36=+3.5331  → FAIL
+[63/80] MIX07  Hu_factor=0.92  c_mult=1.00  c_eff=1.0532
+         max|R|=3.5350°F @di=40  R47=-0.6526  R48=+0.2145  R36=+3.5343  → FAIL
+[64/80] MIX07  Hu_factor=0.92  c_mult=1.03  c_eff=1.0848
+         max|R|=3.5372°F @di=40  R47=-0.6120  R48=+0.2148  R36=+3.5355  → FAIL
+[65/80] MIX07  Hu_factor=0.92  c_mult=1.05  c_eff=1.1059
+         max|R|=3.5387°F @di=40  R47=-0.5848  R48=+0.2151  R36=+3.5363  → FAIL
+[66/80] MIX07  Hu_factor=0.93  c_mult=0.95  c_eff=1.0005
+         max|R|=4.6330°F @di=36  R47=-0.3519  R48=+0.2169  R36=+4.6330  → FAIL
+[67/80] MIX07  Hu_factor=0.93  c_mult=0.97  c_eff=1.0216
+         max|R|=4.6338°F @di=36  R47=-0.3247  R48=+0.2172  R36=+4.6338  → FAIL
+[68/80] MIX07  Hu_factor=0.93  c_mult=1.00  c_eff=1.0532
+         max|R|=4.6350°F @di=36  R47=-0.2837  R48=+0.2175  R36=+4.6350  → FAIL
+[69/80] MIX07  Hu_factor=0.93  c_mult=1.03  c_eff=1.0848
+         max|R|=4.6366°F @di=40  R47=-0.2425  R48=+0.2179  R36=+4.6362  → FAIL
+[70/80] MIX07  Hu_factor=0.93  c_mult=1.05  c_eff=1.1059
+         max|R|=4.6381°F @di=40  R47=-0.2149  R48=+0.2181  R36=+4.6369  → FAIL
+[71/80] MIX07  Hu_factor=0.94  c_mult=0.95  c_eff=1.0005
+         max|R|=5.7384°F @di=36  R47=+0.0172  R48=+0.2200  R36=+5.7384  → FAIL
+[72/80] MIX07  Hu_factor=0.94  c_mult=0.97  c_eff=1.0216
+         max|R|=5.7391°F @di=36  R47=+0.0448  R48=+0.2202  R36=+5.7391  → FAIL
+[73/80] MIX07  Hu_factor=0.94  c_mult=1.00  c_eff=1.0532
+         max|R|=5.7403°F @di=36  R47=+0.0863  R48=+0.2206  R36=+5.7403  → FAIL
+[74/80] MIX07  Hu_factor=0.94  c_mult=1.03  c_eff=1.0848
+         max|R|=5.7415°F @di=36  R47=+0.1281  R48=+0.2209  R36=+5.7415  → FAIL
+[75/80] MIX07  Hu_factor=0.94  c_mult=1.05  c_eff=1.1059
+         max|R|=5.7422°F @di=36  R47=+0.1561  R48=+0.2212  R36=+5.7422  → FAIL
+[76/80] MIX07  Hu_factor=0.95  c_mult=0.95  c_eff=1.0005
+         max|R|=6.8484°F @di=36  R47=+0.3874  R48=+0.2230  R36=+6.8484  → FAIL
+[77/80] MIX07  Hu_factor=0.95  c_mult=0.97  c_eff=1.0216
+         max|R|=6.8491°F @di=36  R47=+0.4154  R48=+0.2233  R36=+6.8491  → FAIL
+[78/80] MIX07  Hu_factor=0.95  c_mult=1.00  c_eff=1.0532
+         max|R|=6.8503°F @di=36  R47=+0.4576  R48=+0.2236  R36=+6.8503  → FAIL
+[79/80] MIX07  Hu_factor=0.95  c_mult=1.03  c_eff=1.0848
+         max|R|=6.8514°F @di=36  R47=+0.5000  R48=+0.2240  R36=+6.8514  → FAIL
+[80/80] MIX07  Hu_factor=0.95  c_mult=1.05  c_eff=1.1059
+         max|R|=6.8522°F @di=36  R47=+0.5284  R48=+0.2243  R36=+6.8522  → FAIL
+
+Wrote /Users/hqa668/calcshore-thermal-2d/validation/sprint9/stage1_pilot_sweep/data/sweep_residual_table.csv  (80 rows)
+Wrote /Users/hqa668/calcshore-thermal-2d/validation/sprint9/stage1_pilot_sweep/data/sweep_wrapper_log.csv  (80 rows)
+
+======================================================================
+Headline diagnostic — R(di=47) statistics per mix across full 8×5 grid:
+  MIX01: mean=-2.1293°F  std=0.6824°F  range=[-3.2527, -0.9974]°F
+  MIX07: mean=-0.8333°F  std=0.8439°F  range=[-2.1795, +0.5284]°F
+======================================================================
+
+All 80 runs complete. Next: run analyze_sweep.py

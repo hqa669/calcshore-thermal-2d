@@ -1,0 +1,128 @@
+Sprint 9 Stage 1-pilot — refined (Hu_factor, c) sensitivity sweep v2
+Grid: mix-specific 5-point Hu_factor × 5 c_multiplier × 2 mixes = 50 runs
+C_ANCHOR = 1.0532
+MIX-01 Hu grid: [0.9414, 0.9464, 0.9514, 0.9564, 0.9614]  (correct = 0.9514)
+MIX-07 Hu grid: [0.8846, 0.8896, 0.8946, 0.8996, 0.9046]  (correct = 0.8946)
+
+[01/50] MIX01  Hu_factor=0.9414  c_mult=0.95  c_eff=1.0005
+  Sanity check (MIX01):
+    T_IC  (di=24,t=0)   = 73.0000°F  (expect 73.0±0.05°F) → OK
+    T_bot (di=48,t=168) = 85.1942°F  (expect 85.0±0.5°F)  → OK
+    T_core(di=24,t=168) = 148.5263°F  (expect > 110°F)         → OK
+    All sanity checks PASSED.
+         max|R|=1.5175°F @di=45  R36=-0.7077  R42=-0.7296  R47=-1.4398  R48=+0.2022  drop=-0.7102  T_core=148.53°F  → FAIL
+[02/50] MIX01  Hu_factor=0.9414  c_mult=0.97  c_eff=1.0216
+         max|R|=1.4678°F @di=45  R36=-0.7027  R42=-0.7183  R47=-1.4029  R48=+0.2026  drop=-0.6846  T_core=148.53°F  → FAIL
+[03/50] MIX01  Hu_factor=0.9414  c_mult=1.00  c_eff=1.0532
+         max|R|=1.3931°F @di=45  R36=-0.6951  R42=-0.7014  R47=-1.3471  R48=+0.2030  drop=-0.6457  T_core=148.54°F  → FAIL
+[04/50] MIX01  Hu_factor=0.9414  c_mult=1.03  c_eff=1.0848
+         max|R|=1.3182°F @di=45  R36=-0.6875  R42=-0.6846  R47=-1.2910  R48=+0.2035  drop=-0.6064  T_core=148.55°F  → FAIL
+[05/50] MIX01  Hu_factor=0.9414  c_mult=1.05  c_eff=1.1059
+         max|R|=1.2681°F @di=45  R36=-0.6825  R42=-0.6734  R47=-1.2533  R48=+0.2039  drop=-0.5798  T_core=148.55°F  → FAIL
+[06/50] MIX01  Hu_factor=0.9464  c_mult=0.95  c_eff=1.0005
+         max|R|=1.2922°F @di=47  R36=-0.2770  R42=-0.3033  R47=-1.2922  R48=+0.2034  drop=-0.9889  T_core=148.96°F  → FAIL
+[07/50] MIX01  Hu_factor=0.9464  c_mult=0.97  c_eff=1.0216
+         max|R|=1.2550°F @di=47  R36=-0.2720  R42=-0.2919  R47=-1.2550  R48=+0.2038  drop=-0.9631  T_core=148.96°F  → FAIL
+[08/50] MIX01  Hu_factor=0.9464  c_mult=1.00  c_eff=1.0532
+         max|R|=1.1989°F @di=47  R36=-0.2645  R42=-0.2750  R47=-1.1989  R48=+0.2043  drop=-0.9240  T_core=148.97°F  → FAIL
+[09/50] MIX01  Hu_factor=0.9464  c_mult=1.03  c_eff=1.0848
+         max|R|=1.1424°F @di=47  R36=-0.2570  R42=-0.2581  R47=-1.1424  R48=+0.2048  drop=-0.8843  T_core=148.98°F  → FAIL
+[10/50] MIX01  Hu_factor=0.9464  c_mult=1.05  c_eff=1.1059
+         max|R|=1.1045°F @di=47  R36=-0.2520  R42=-0.2470  R47=-1.1045  R48=+0.2051  drop=-0.8575  T_core=148.98°F  → FAIL
+[11/50] MIX01  Hu_factor=0.9514  c_mult=0.95  c_eff=1.0005
+         max|R|=1.1446°F @di=47  R36=+0.1538  R42=+0.1232  R47=-1.1446  R48=+0.2047  drop=-1.2678  T_core=149.39°F  → FAIL
+[12/50] MIX01  Hu_factor=0.9514  c_mult=0.97  c_eff=1.0216
+         max|R|=1.1072°F @di=47  R36=+0.1588  R42=+0.1346  R47=-1.1072  R48=+0.2050  drop=-1.2418  T_core=149.39°F  → FAIL
+[13/50] MIX01  Hu_factor=0.9514  c_mult=1.00  c_eff=1.0532
+         max|R|=1.0507°F @di=47  R36=+0.1662  R42=+0.1516  R47=-1.0507  R48=+0.2055  drop=-1.2023  T_core=149.40°F  → FAIL
+[14/50] MIX01  Hu_factor=0.9514  c_mult=1.03  c_eff=1.0848
+         max|R|=0.9939°F @di=47  R36=+0.1737  R42=+0.1684  R47=-0.9939  R48=+0.2060  drop=-1.1623  T_core=149.41°F  → FAIL
+[15/50] MIX01  Hu_factor=0.9514  c_mult=1.05  c_eff=1.1059
+         max|R|=0.9558°F @di=47  R36=+0.1786  R42=+0.1796  R47=-0.9558  R48=+0.2063  drop=-1.1354  T_core=149.41°F  → FAIL
+[16/50] MIX01  Hu_factor=0.9564  c_mult=0.95  c_eff=1.0005
+         max|R|=0.9970°F @di=47  R36=+0.5848  R42=+0.5499  R47=-0.9970  R48=+0.2059  drop=-1.5468  T_core=149.82°F  → FAIL
+[17/50] MIX01  Hu_factor=0.9564  c_mult=0.97  c_eff=1.0216
+         max|R|=0.9593°F @di=47  R36=+0.5897  R42=+0.5613  R47=-0.9593  R48=+0.2062  drop=-1.5206  T_core=149.82°F  → FAIL
+[18/50] MIX01  Hu_factor=0.9564  c_mult=1.00  c_eff=1.0532
+         max|R|=0.9025°F @di=47  R36=+0.5971  R42=+0.5783  R47=-0.9025  R48=+0.2067  drop=-1.4808  T_core=149.83°F  → FAIL
+[19/50] MIX01  Hu_factor=0.9564  c_mult=1.03  c_eff=1.0848
+         max|R|=0.8453°F @di=47  R36=+0.6045  R42=+0.5951  R47=-0.8453  R48=+0.2072  drop=-1.4405  T_core=149.84°F  → FAIL
+[20/50] MIX01  Hu_factor=0.9564  c_mult=1.05  c_eff=1.1059
+         max|R|=0.8070°F @di=47  R36=+0.6094  R42=+0.6063  R47=-0.8070  R48=+0.2075  drop=-1.4133  T_core=149.84°F  → FAIL
+[21/50] MIX01  Hu_factor=0.9614  c_mult=0.95  c_eff=1.0005
+         max|R|=1.0159°F @di=24  R36=+1.0159  R42=+0.9767  R47=-0.8493  R48=+0.2071  drop=-1.8260  T_core=150.25°F  → FAIL
+[22/50] MIX01  Hu_factor=0.9614  c_mult=0.97  c_eff=1.0216
+         max|R|=1.0208°F @di=36  R36=+1.0208  R42=+0.9881  R47=-0.8115  R48=+0.2074  drop=-1.7995  T_core=150.25°F  → FAIL
+[23/50] MIX01  Hu_factor=0.9614  c_mult=1.00  c_eff=1.0532
+         max|R|=1.0281°F @di=24  R36=+1.0281  R42=+1.0051  R47=-0.7544  R48=+0.2079  drop=-1.7594  T_core=150.26°F  → FAIL
+[24/50] MIX01  Hu_factor=0.9614  c_mult=1.03  c_eff=1.0848
+         max|R|=1.0354°F @di=24  R36=+1.0354  R42=+1.0220  R47=-0.6968  R48=+0.2084  drop=-1.7188  T_core=150.27°F  → FAIL
+[25/50] MIX01  Hu_factor=0.9614  c_mult=1.05  c_eff=1.1059
+         max|R|=1.0403°F @di=24  R36=+1.0403  R42=+1.0332  R47=-0.6582  R48=+0.2087  drop=-1.6914  T_core=150.27°F  → FAIL
+[26/50] MIX07  Hu_factor=0.8846  c_mult=0.95  c_eff=1.0005
+  Sanity check (MIX07):
+    T_IC  (di=24,t=0)   = 73.0000°F  (expect 73.0±0.05°F) → OK
+    T_bot (di=48,t=168) = 85.1952°F  (expect 85.0±0.5°F)  → OK
+    T_core(di=24,t=168) = 147.6298°F  (expect > 110°F)         → OK
+    All sanity checks PASSED.
+         max|R|=2.0126°F @di=47  R36=-0.3261  R42=-0.4440  R47=-2.0126  R48=+0.2032  drop=-1.5686  T_core=147.63°F  → FAIL
+[27/50] MIX07  Hu_factor=0.8846  c_mult=0.97  c_eff=1.0216
+         max|R|=1.9872°F @di=47  R36=-0.3253  R42=-0.4376  R47=-1.9872  R48=+0.2035  drop=-1.5496  T_core=147.63°F  → FAIL
+[28/50] MIX07  Hu_factor=0.8846  c_mult=1.00  c_eff=1.0532
+         max|R|=1.9489°F @di=47  R36=-0.3240  R42=-0.4279  R47=-1.9489  R48=+0.2038  drop=-1.5210  T_core=147.63°F  → FAIL
+[29/50] MIX07  Hu_factor=0.8846  c_mult=1.03  c_eff=1.0848
+         max|R|=1.9104°F @di=47  R36=-0.3227  R42=-0.4183  R47=-1.9104  R48=+0.2041  drop=-1.4921  T_core=147.63°F  → FAIL
+[30/50] MIX07  Hu_factor=0.8846  c_mult=1.05  c_eff=1.1059
+         max|R|=1.8846°F @di=47  R36=-0.3219  R42=-0.4119  R47=-1.8846  R48=+0.2044  drop=-1.4727  T_core=147.63°F  → FAIL
+[31/50] MIX07  Hu_factor=0.8896  c_mult=0.95  c_eff=1.0005
+         max|R|=1.8310°F @di=47  R36=+0.2152  R42=+0.0896  R47=-1.8310  R48=+0.2048  drop=-1.9206  T_core=148.17°F  → FAIL
+[32/50] MIX07  Hu_factor=0.8896  c_mult=0.97  c_eff=1.0216
+         max|R|=1.8053°F @di=47  R36=+0.2160  R42=+0.0962  R47=-1.8053  R48=+0.2050  drop=-1.9015  T_core=148.17°F  → FAIL
+[33/50] MIX07  Hu_factor=0.8896  c_mult=1.00  c_eff=1.0532
+         max|R|=1.7667°F @di=47  R36=+0.2173  R42=+0.1059  R47=-1.7667  R48=+0.2053  drop=-1.8727  T_core=148.17°F  → FAIL
+[34/50] MIX07  Hu_factor=0.8896  c_mult=1.03  c_eff=1.0848
+         max|R|=1.7279°F @di=47  R36=+0.2186  R42=+0.1156  R47=-1.7279  R48=+0.2056  drop=-1.8436  T_core=148.17°F  → FAIL
+[35/50] MIX07  Hu_factor=0.8896  c_mult=1.05  c_eff=1.1059
+         max|R|=1.7019°F @di=47  R36=+0.2194  R42=+0.1221  R47=-1.7019  R48=+0.2059  drop=-1.8240  T_core=148.18°F  → FAIL
+[36/50] MIX07  Hu_factor=0.8946  c_mult=0.95  c_eff=1.0005
+         max|R|=1.6490°F @di=47  R36=+0.7577  R42=+0.6244  R47=-1.6490  R48=+0.2063  drop=-2.2734  T_core=148.71°F  → FAIL
+[37/50] MIX07  Hu_factor=0.8946  c_mult=0.97  c_eff=1.0216
+         max|R|=1.6232°F @di=47  R36=+0.7585  R42=+0.6311  R47=-1.6232  R48=+0.2065  drop=-2.2542  T_core=148.71°F  → FAIL
+[38/50] MIX07  Hu_factor=0.8946  c_mult=1.00  c_eff=1.0532
+         max|R|=1.5843°F @di=47  R36=+0.7598  R42=+0.6409  R47=-1.5843  R48=+0.2068  drop=-2.2252  T_core=148.72°F  → FAIL
+[39/50] MIX07  Hu_factor=0.8946  c_mult=1.03  c_eff=1.0848
+         max|R|=1.5452°F @di=47  R36=+0.7611  R42=+0.6508  R47=-1.5452  R48=+0.2071  drop=-2.1959  T_core=148.72°F  → FAIL
+[40/50] MIX07  Hu_factor=0.8946  c_mult=1.05  c_eff=1.1059
+         max|R|=1.5190°F @di=47  R36=+0.7619  R42=+0.6573  R47=-1.5190  R48=+0.2074  drop=-2.1763  T_core=148.72°F  → FAIL
+[41/50] MIX07  Hu_factor=0.8996  c_mult=0.95  c_eff=1.0005
+         max|R|=1.4667°F @di=47  R36=+1.3014  R42=+1.1604  R47=-1.4667  R48=+0.2078  drop=-2.6271  T_core=149.26°F  → FAIL
+[42/50] MIX07  Hu_factor=0.8996  c_mult=0.97  c_eff=1.0216
+         max|R|=1.4407°F @di=47  R36=+1.3023  R42=+1.1671  R47=-1.4407  R48=+0.2080  drop=-2.6078  T_core=149.26°F  → FAIL
+[43/50] MIX07  Hu_factor=0.8996  c_mult=1.00  c_eff=1.0532
+         max|R|=1.4015°F @di=47  R36=+1.3035  R42=+1.1771  R47=-1.4015  R48=+0.2083  drop=-2.5786  T_core=149.26°F  → FAIL
+[44/50] MIX07  Hu_factor=0.8996  c_mult=1.03  c_eff=1.0848
+         max|R|=1.3621°F @di=47  R36=+1.3048  R42=+1.1871  R47=-1.3621  R48=+0.2087  drop=-2.5492  T_core=149.26°F  → FAIL
+[45/50] MIX07  Hu_factor=0.8996  c_mult=1.05  c_eff=1.1059
+         max|R|=1.3357°F @di=47  R36=+1.3056  R42=+1.1936  R47=-1.3357  R48=+0.2089  drop=-2.5294  T_core=149.26°F  → FAIL
+[46/50] MIX07  Hu_factor=0.9046  c_mult=0.95  c_eff=1.0005
+         max|R|=1.8475°F @di=40  R36=+1.8464  R42=+1.6976  R47=-1.2841  R48=+0.2093  drop=-2.9817  T_core=149.80°F  → FAIL
+[47/50] MIX07  Hu_factor=0.9046  c_mult=0.97  c_eff=1.0216
+         max|R|=1.8490°F @di=40  R36=+1.8472  R42=+1.7044  R47=-1.2579  R48=+0.2095  drop=-2.9623  T_core=149.80°F  → FAIL
+[48/50] MIX07  Hu_factor=0.9046  c_mult=1.00  c_eff=1.0532
+         max|R|=1.8513°F @di=40  R36=+1.8484  R42=+1.7145  R47=-1.2184  R48=+0.2098  drop=-2.9329  T_core=149.80°F  → FAIL
+[49/50] MIX07  Hu_factor=0.9046  c_mult=1.03  c_eff=1.0848
+         max|R|=1.8535°F @di=40  R36=+1.8497  R42=+1.7245  R47=-1.1787  R48=+0.2102  drop=-2.9032  T_core=149.81°F  → FAIL
+[50/50] MIX07  Hu_factor=0.9046  c_mult=1.05  c_eff=1.1059
+         max|R|=1.8549°F @di=40  R36=+1.8505  R42=+1.7312  R47=-1.1521  R48=+0.2104  drop=-2.8833  T_core=149.81°F  → FAIL
+
+Wrote /Users/hqa668/calcshore-thermal-2d/validation/sprint9/stage1_pilot_sweep_v2/data/sweep_v2_residual_table.csv  (50 rows)
+Wrote /Users/hqa668/calcshore-thermal-2d/validation/sprint9/stage1_pilot_sweep_v2/data/sweep_v2_wrapper_log.csv  (50 rows)
+
+======================================================================
+Runtime: 57.5 s total  (1.15 s/run)
+Headline stencil_drop statistics per mix (all 25 grid points each):
+  MIX01: mean=-1.2021°F  std=0.3968°F  range=[-1.8260, -0.5798]°F
+  MIX07: mean=-2.2259°F  std=0.5005°F  range=[-2.9817, -1.4727]°F
+======================================================================
+
+All 50 runs complete. Next: run analyze_sweep_v2.py
