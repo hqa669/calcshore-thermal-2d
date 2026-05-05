@@ -1,0 +1,8 @@
+# Sprint 8 Stage 2 §3.5 — Optimal k_uc factor per α target
+
+alpha_u  optimal_factor
+0.036    0.960  (Sprint 7 anchor)
+0.200    0.920
+0.400    0.920
+0.600    0.920
+0.800    0.920

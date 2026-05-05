@@ -1,0 +1,10 @@
+pair,pair_label,t_hr,t_actual_a,t_actual_b,max_abs_dT_F,mean_abs_dT_F,rms_dT_F,loc_di,loc_wi
+A,highhyd − lowhyd,24,24.0,24.0,1.458,1.2709,1.3339,44,8
+A,highhyd − lowhyd,84,84.0,84.0,2.016,1.5391,1.6785,5,0
+A,highhyd − lowhyd,168,168.0,168.0,2.16,1.4376,1.6343,8,0
+B,highhyd_b010 − lowhyd,24,24.0,24.0,0.882,0.7445,0.7896,4,0
+B,highhyd_b010 − lowhyd,84,84.0,84.0,0.99,0.7198,0.7971,6,0
+B,highhyd_b010 − lowhyd,168,168.0,168.0,1.026,0.6633,0.7637,7,0
+C,highhyd − highhyd_b010,24,24.0,24.0,0.594,0.5264,0.5484,4,10
+C,highhyd − highhyd_b010,84,84.0,84.0,1.044,0.8194,0.8832,4,1
+C,highhyd − highhyd_b010,168,168.0,168.0,1.134,0.7747,0.8715,6,3

@@ -1,0 +1,10 @@
+label,folder,alpha_u,T_pl_F,T_so_F,factor,r1_max_F,r2_max_F,r3_rmse_F,gate_r1,gate_r2,passes,minimax
+S7_A,/Users/hqa668/calcshore-thermal-2d/validation/soil_calibration/cw_runs/runA_baseline,0.036,73,73,0.96,0.12999345722033695,0.12999346734268613,0.0529461966381575,True,True,True,0.12999346734268613
+S7_B,/Users/hqa668/calcshore-thermal-2d/validation/soil_calibration/cw_runs/runB_73_60,0.036,73,60,0.96,0.13026986118069317,0.1306977010936805,0.05235144247478849,True,True,True,0.1306977010936805
+S7_C,/Users/hqa668/calcshore-thermal-2d/validation/soil_calibration/cw_runs/runC_73_90,0.036,73,90,0.96,0.18289579161071856,0.15274121779825123,0.0678282102189901,True,True,True,0.18289579161071856
+S7_D,/Users/hqa668/calcshore-thermal-2d/validation/soil_calibration/cw_runs/runD_60_73,0.036,60,73,0.96,0.14552061267488625,0.11970116364533823,0.05148553931512601,True,True,True,0.14552061267488625
+S7_E,/Users/hqa668/calcshore-thermal-2d/validation/soil_calibration/cw_runs/runE_90_73,0.036,90,73,0.96,0.15984433178367397,0.17866624677105847,0.06409387816278785,True,True,True,0.17866624677105847
+S7_F,/Users/hqa668/calcshore-thermal-2d/validation/soil_calibration/cw_runs/runF_73_45,0.036,73,45,0.96,0.130589089523923,0.19374174642741337,0.06201256187646705,True,True,True,0.19374174642741337
+S7_G,/Users/hqa668/calcshore-thermal-2d/validation/soil_calibration/cw_runs/runG_73_100,0.036,73,100,0.96,0.22842958962327486,0.18061380837481522,0.08459849485492552,True,True,True,0.22842958962327486
+S7_H,/Users/hqa668/calcshore-thermal-2d/validation/soil_calibration/cw_runs/runH_45_73,0.036,45,73,0.96,0.16294824134441654,0.13593306764808233,0.06229836226322842,True,True,True,0.16294824134441654
+S7_I,/Users/hqa668/calcshore-thermal-2d/validation/soil_calibration/cw_runs/runI_100_73,0.036,100,73,0.96,0.18455988708736015,0.21907402663558173,0.07884827390456679,True,True,True,0.21907402663558173
